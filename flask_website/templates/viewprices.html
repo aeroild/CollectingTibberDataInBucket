@@ -1,0 +1,65 @@
+{% extends "/templates/template.html" %}
+
+{% block title %}View selected data{% endblock %}
+
+{% block main %}
+
+<div class="container">
+
+    <h4>Energy prices now: {{price_now}} (SEK/kWh)  - {{rating_now}}</h4>
+    <br>
+    <h4>Today's energy prices</h4>
+    <div class="row">
+        <div class="col">
+            <table style="width:60%">
+                <tr><th>Hour</th><th>Price (SEK/kWh)</th><th>Rating</th></tr>
+                {% for d in prices_today %}
+                <tr><td>{{d[3]}}</td><td>{{d[0]}}</td><td>{{d[6]}}</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    <br>
+    <h4>Tomorrow's energy prices (available from approx. 13:15)</h4>
+    <div class="row">
+        <div class="col">
+            <table style="width:60%">
+                <tr><th>Hour</th><th>Price (SEK/kWh)</th><th>Rating</th></tr>
+                {% for d in prices_tomorrow %}
+                <tr><td>{{d[3]}}</td><td>{{d[0]}}</td><td>{{d[6]}}</td></tr>
+                {% endfor %}
+        </table>
+        </div>
+    </div>
+    <br>
+    <h4>Rating is based on energy prices last {{numberofdays}} days devided into deciles</h4>
+    <div class="row">
+        <div class="col">
+            <table style="width:60%">
+                <tr><th>Decile</th><th>Rating</th><th>Number of obs</th><th>Mean</th><th>Std</th><th>Min</th><th>Max</th></tr>
+                {% for d in deciles %}
+                <tr><td>{{d[8]}}</td><td>{{d[9]}}</td><td>{{d[0]}}</td><td>{{d[1]}}</td><td>{{d[2]}}</td><td>{{d[3]}}</td><td>{{d[7]}}</td></tr>
+                {% endfor %}
+        </table>
+        </div>
+    </div>
+    <br>
+    <form action="/viewprices" method="POST" id="Formy" action="submit-url">    
+    <label>Customize the number of days to use</label> 
+    <div class="row">
+        <div class="col-auto">
+            <div class="form-group">            
+                <input type="number" class="form-control" name="numberofdays">
+            </div>
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>        
+    </div>
+    </form>            
+    
+
+</div>
+
+
+{% endblock %}

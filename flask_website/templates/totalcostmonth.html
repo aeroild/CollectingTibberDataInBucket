@@ -1,0 +1,69 @@
+{% extends "/templates/template.html" %}
+
+{% block title %}Choose a day{% endblock %}
+
+{% block main %}
+
+<div class="container">
+
+            <h4>Please select month to view total cost</h4>
+        <div class="form-group">   
+            <div class="row">
+                <div class="col-auto">
+                <form action="/totalcostmonth" method="POST">
+                    <select class="form-select" id="costmonth" name="costmonth" required>
+                    <option selected>Select month</option>
+                    {% for months in months_list %}
+                    <option value="{{ months }}">{{ months }}</option>
+                    {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">  
+                <button type="submit" name="action" value="View selected month" class="btn btn-primary">View selected month</button>
+                </div>
+                </form>                                    
+                <div class="col-auto">
+                <i><b>or</b></i>
+                </div>
+                <div class="col-auto"> 
+                    <form action="/totalcostmonth" method="POST">
+                        <input type="submit" class="btn btn-primary" name="action" value="View year to date">
+                
+                    </form>                    
+                </div>
+            </div>
+        </div>
+
+    <br>
+    <br>
+    <h4>Total cost {{monthtoshow}}</h4>
+    <table style="width:30%">
+    <tr><th>Total</b></th></tr>
+    <tr><td>Consumption (kWh):</td><td>{{aggr[0][0]}}</td></tr>
+    <tr><td>Cost Tibber (SEK):</td><td>{{aggr[0][1]}}</td></tr>
+    <tr><td>Cost Tibber (SEK) per kWh:</td><td>{{total_cost_tibber_per_kwh}}</td></tr>        
+    <tr><td>Cost Ellevio (SEK):</td><td>{{total_cost_ellevio}}</td></tr>
+    <tr><td>Total cost (SEK):</td><td>{{total_cost}}</td></tr>
+    <tr><td>Total cost (SEK) per kWh:</td><td>{{total_cost_per_kwh}}</td></tr>    
+
+    <tr><th>House</th></tr>
+    <tr><td>Consumption (kWh):</td><td>{{aggr[0][2]}}</td></tr>
+    <tr><td>Cost Tibber (SEK):</td><td>{{aggr[0][4]}}</td></tr>
+    <tr><td>Cost Tibber (SEK) per kWh:</td><td>{{house_cost_tibber_per_kwh}}</td></tr>            
+    <tr><td>Cost Ellevio (SEK):</td><td>{{cost_house_ellevio}}</td></tr>
+    <tr><td>Total cost house (SEK):</td><td>{{cost_house_total}}</td></tr>
+    <tr><td>Total cost (SEK) per kWh:</td><td>{{cost_house_per_kwh_total}}</td></tr>    
+
+    <tr><th>EV</th></tr>
+    <tr><td>Consumption (kWh):</td><td>{{aggr[0][3]}}</td></tr>
+    <tr><td>Cost Tibber (SEK):</td><td>{{aggr[0][5]}}</td></tr>
+    <tr><td>Cost Tibber (SEK) per kWh:</td><td>{{ev_cost_tibber_per_kwh}}</td></tr>            
+    <tr><td>Cost Ellevio (SEK):</td><td>{{cost_ev_ellevio}}</td></tr>
+    <tr><td>Total cost EV (SEK):</td><td>{{cost_ev_total}}</td></tr>
+    <tr><td>Total cost (SEK) per kWh:</td><td>{{cost_ev_per_kwh_total}}</td></tr>    
+</table>
+ 
+</div>
+
+
+{% endblock %}
