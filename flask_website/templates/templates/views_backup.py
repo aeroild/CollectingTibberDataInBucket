@@ -22,13 +22,67 @@ import pandas as pd
 
 import numpy as np
 
-from flask_website.config import tibber_token, my_bucket
+from flask_website.config import tibber_token
 
+#Uploading and downloading data to/from Google Cloud Storage Buckets
 from google.cloud import storage
-
+from os import listdir
+from os.path import isfile, join
+from flask_website.config import bucketName, localFolder, bucketFolder
 
 @app.route("/")
 def index():
+
+    if request.method == "GET":
+
+        bucketName='forzaboxen.appspot.com'
+
+        localFolder = '/Data/Bucket/test/'
+
+        bucketFolder = 'Test/'
+
+        #storage_client = storage.Client()
+        storage_client = storage.Client.from_service_account_json('/Data/Bucket/forzaboxen-81992a42e89a.json')
+        bucket = storage_client.get_bucket(bucketName)
+
+        def upload_files(bucketName):
+            """Upload files to GCP bucket."""
+            files = [f for f in listdir(localFolder) if isfile(join(localFolder, f))]
+            for file in files:
+                localFile = localFolder + file
+                blob = bucket.blob(bucketFolder + file)
+                blob.upload_from_filename(localFile)
+            return f'Uploaded {files} to "{bucketName}" bucket.'
+
+        from google.cloud import storage
+
+        upload_files('forzaboxen.appspot.com')
+
+        """
+        bucket_name='forzaboxen.appspot.com'
+
+        def upload_blob_from_memory(bucket_name, contents, destination_blob_name):
+            #Uploads a file to the bucket.
+
+            # The ID of your GCS bucket
+            # bucket_name = "your-bucket-name"
+
+            # The contents to upload to the file
+            # contents = "these are my contents"
+
+            # The ID of your GCS object
+            # destination_blob_name = "storage-object-name"
+
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(destination_blob_name)
+
+            blob.upload_from_string(contents)
+
+            print(
+                f"{destination_blob_name} with contents {contents} uploaded to {bucket_name}."
+            )
+        """
 
     return render_template("index.html")
 
@@ -68,26 +122,17 @@ def datacollected():
 
         if action[13:16] == "whe":
 
-            # Retrieving all files from Google storage and finding the last hour collected
-            storage_client = storage.Client()
-            bucket = storage_client.get_bucket(my_bucket)            
-            my_prefix = "Consumption/"
-            blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+            #Getting all filenames collected and make them into a list
+            entries = os.listdir('/Data/Bucket/Consumption/')
 
-            list_filesnames_gcs = []
+            df_entries = pd.DataFrame((entries), columns=['filename'])        
+            df_entries["start"] = df_entries.filename.str[0:13]
+            df_entries = df_entries.drop(columns=['filename'])            
+            df_entries = df_entries.sort_values('start', ascending=False)                    
+            entries = df_entries.values.tolist() 
 
-            for blob in blobs:
-                if(blob.name != my_prefix):
-                    storedtimes = blob.name.replace(my_prefix, "")
-                    list_filesnames_gcs.append(storedtimes)
-            
-            df_storedtimes = pd.DataFrame((list_filesnames_gcs), columns=['filename'])        
-            df_storedtimes["start"] = df_storedtimes.filename.str[0:13]
-            df_storedtimes = df_storedtimes.drop(columns=['filename'])            
-            df_storedtimes = df_storedtimes.sort_values('start', ascending=False)                    
-            list_storedtimes2 = df_storedtimes.to_records(index=False)
-
-            lastcollected = list_storedtimes2[0][0]+':00'
+            #Keeping the first item in the list, i.e. the newest start time
+            lastcollected = entries[0][0]+':00'
 
             #Converting start time into a datetime object
             lastcollected2=datetime.datetime.strptime(lastcollected, '%Y-%m-%dT%H:%M')
@@ -106,8 +151,8 @@ def datacollected():
             #Subtracting one hour since we do not want to collect the last collected hour again
             hourstocollect = int(thours)-1
 
-        if hourstocollect > 720:
-            hourstocollect = 720
+        if hourstocollect > 4500:
+            hourstocollect = 4500
         if hourstocollect < 0 or hourstocollect == 0:
             flash("Can't collect 0 hours. Please input a number equal to 1 or higher")
             return redirect("/collectdata")
@@ -115,7 +160,6 @@ def datacollected():
         ###############################################################################################
         #Collecting data from Tibber and saving it in lists that are merged and made into a tuple list
         ###############################################################################################
-
         account=tibber.Account(tibber_token)
         home = account.homes[0]
         hour_data = home.fetch_consumption("HOURLY", last=hourstocollect)
@@ -148,6 +192,10 @@ def datacollected():
         #Removing SEK from the list containing prices
         price = ([s.replace('SEK', '') for s in price])
 
+        ############################################################################
+        # Checking which data to insert and which to update in the database table
+        ############################################################################
+
         #Merging all lists of data to one tuple list and transforming it into a dataframe
         def merge(date,start,stop,price,cons,cost):
             merged_list = [(date[i], start[i], stop[i], price[i], cons[i], cost[i]) for i in range(0, len(start))]
@@ -157,69 +205,43 @@ def datacollected():
         df_collected = pd.DataFrame((collected_data), columns=['date', 'start', 'stop', 'price', 'cons', 'cost'])
         df_collected_data = pd.DataFrame((collected_data), columns=['date', 'start', 'stop', 'price', 'cons', 'cost'])        
 
-        #Creates a new column with the filename to be used
+        #Creates a new column with the filename
         df_collected_data["filename"] = df_collected_data.start.str[0:13]
 
-        #############################################################
-        # Storing all collected data in Google Cloud Storage
-        #############################################################  
+        for row in df_collected_data.reset_index().values:
+            filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+            #filename = 'gs://forzaboxen.appspot.com/Collecteddata/{}.csv'.format(row[7])
+            row[1:7].tofile(filename, sep=",", format="%s")
 
-        storage_client = storage.Client()
-        bucket = storage_client.get_bucket(my_bucket)
+        #Getting all filenames collected and make them into a list to check which consumption and cost data is new and to be inserted
+        starttimes = os.listdir('/Data/Bucket/Consumption/')
+        df_starttimes = pd.DataFrame((starttimes), columns=['filename'])        
+        df_starttimes["start"] = df_starttimes.filename.str[0:13]+':00'
+        df_starttimes = df_starttimes.drop(columns=['filename'])            
+        df_starttimes = df_starttimes.sort_values('start', ascending=False)                    
+        starttimes2 = df_starttimes.to_records(index=False)
+        starttimes2  = [tupleObj[0] for tupleObj in starttimes2]            
+        list_starttimes = list(starttimes2)
 
-        df_collected_data = df_collected_data.reset_index()  # make sure indexes pair with number of rows
-
-        for index, row in df_collected_data.iterrows():
-            bucket.blob('Collecteddata/{}.csv'.format(row.iloc[7])).upload_from_string(row.iloc[1:7].to_csv(header=False, index=False), 'text/csv')
-
-        # Storing newly collected consumption data in Google storage        
-        my_prefix = "Consumption/"
-        blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
-
-        list_filesnames_gcs = []
-
-        for blob in blobs:
-            if(blob.name != my_prefix):
-                storedtimes = blob.name.replace(my_prefix, "")
-                list_filesnames_gcs.append(storedtimes)
-
-        df_storedtimes = pd.DataFrame((list_filesnames_gcs), columns=['filename'])        
-        df_storedtimes["start"] = df_storedtimes.filename.str[0:13]+':00'
-        df_storedtimes = df_storedtimes.drop(columns=['filename'])            
-        df_storedtimes = df_storedtimes.sort_values('start', ascending=False)                    
-        list_storedtimes2 = df_storedtimes.to_records(index=False)
-        list_storedtimes2  = [tupleObj[0] for tupleObj in list_storedtimes2]            
-        list_storedtimes = list(list_storedtimes2)
-
+        #Saving new consumption data
         df_consumption = df_collected.assign(cons_ev = df_collected.cons * 0)        
         df_consumption["filename"] = df_consumption.start.str[0:13]
         df_consumption = df_consumption.drop(columns=['stop', 'price', 'cost'])
+        df_consumption_to_be_saved = df_consumption.query('start not in @list_starttimes')
 
-        #Filtering out which consumption data to store and uploading it to Google storage
-        df_consumption_to_be_saved_gcs = df_consumption.query('start not in @list_storedtimes')
+        for row in df_consumption_to_be_saved.reset_index().values:
+            filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+            row[1:5].tofile(filename, sep=",", format="%s")
 
-        df_consumption_to_be_saved_gcs = df_consumption_to_be_saved_gcs.reset_index()
-
-        for index, row in df_consumption_to_be_saved_gcs.iterrows():
-            bucket.blob('Consumption/{}.csv'.format(row.iloc[5])).upload_from_string(row.iloc[1:5].to_csv(header=False, index=False), 'text/csv')
-
-        # Storing newly collected cost data in Google storage
+        #Saving new cost data
         df_cost = df_collected.assign(cost_ev = df_collected.cost * 0)        
         df_cost["filename"] = df_cost.start.str[0:13]
         df_cost = df_cost.drop(columns=['stop', 'price', 'cons'])
+        df_cost_to_be_saved = df_cost.query('start not in @list_starttimes')        
 
-        #Filtering out which consumption data to store and uploading it to Google storage
-        df_cost_to_be_saved_gcs = df_cost.query('start not in @list_storedtimes')
-
-        #Storing data in projects Google Cloud Bucket
-        df_cost_to_be_saved_gcs = df_cost_to_be_saved_gcs.reset_index()
-
-        for index, row in df_cost_to_be_saved_gcs.iterrows():
-            bucket.blob('Cost/{}.csv'.format(row.iloc[5])).upload_from_string(row.iloc[1:5].to_csv(header=False, index=False), 'text/csv')
-
-        ###########################################################################
-        # Converting collected data to a list to be presented on the webpage
-        ###########################################################################        
+        for row in df_cost_to_be_saved.reset_index().values:
+            filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+            row[1:5].tofile(filename, sep=",", format="%s")
 
         data = tuple(sorted(collected_data, reverse=True))
 
@@ -238,77 +260,36 @@ def updateday():
         date_time = datetime.datetime.now()
         chosendate = date_time.strftime("%Y-%m-%d")        
 
-        ################################################################################################
-        # Getting paths to files stored on Google storage and making them into a list and dataframe. 
-        ################################################################################################
+        #Leser inn data fra filer for valgte dato
+        data_frames = []
+        for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+            for file in files:
+                if file.startswith(chosendate):
+                    df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                    data_frames.append(df)
+        df_data1 = pd.concat(data_frames, ignore_index=True)
 
-        storage_client = storage.Client()
-        bucket = storage_client.get_bucket(my_bucket)        
-        my_prefix = "Collecteddata/"
-        blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+        data_frames = []
+        for root, dirs, files in os.walk(r'\Data\Bucket\Consumption'):
+            for file in files:
+                if file.startswith(chosendate):
+                    df = pd.read_csv(os.path.join("\Data\Bucket\Consumption", file), names=['date', 'start', 'consumption_house', 'consumption_ev'])
+                    data_frames.append(df)
+        df_data2 = pd.concat(data_frames, ignore_index=True)
 
-        list_paths_gcs = []
+        data_frames = []
+        for root, dirs, files in os.walk(r'\Data\Bucket\Cost'):
+            for file in files:
+                if file.startswith(chosendate):
+                    df = pd.read_csv(os.path.join("\Data\Bucket\Cost", file), names=['date', 'start', 'cost_house', 'cost_ev'])
+                    data_frames.append(df)
+        df_data3 = pd.concat(data_frames, ignore_index=True)
 
-        for blob in blobs:        
-            if(blob.name != my_prefix):
-                paths = blob.name.replace(my_prefix, "")            
-                list_paths_gcs.append(paths)                
-
-        #Filtering out all dates other than current date and making it into a list
-        df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-        df_paths["date"] = df_paths.path.str[0:10]
-        list_chosendata= [chosendate]
-        df_paths = df_paths.query('date in @list_chosendata')        
-        df_paths = df_paths.drop(columns=['date'])                    
-        list_paths2 = df_paths.to_records(index=False)
-        list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-        list_paths3 = list(list_paths2)
 
         #Flashing message if there is no date
-        if list_paths3 == []:
-            flash("There is no data for today. Please collect data first")
-            return redirect("/collectdata")        
-
-        #########################################################
-        # Downloading selected files from Google storage
-        #########################################################
-
-        gcs_data_collected = []
-
-        for blob_name in list_paths3:
-            gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-            gcs_data_collected.append(gcs_file_collected)            
-     
-        #Converting data into a Pandas dataframe
-        df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-        df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-        df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-        gcs_data_consumption = []
-
-        for blob_name in list_paths3:
-            gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-            gcs_data_consumption.append(gcs_file_consumption)            
-     
-        #Converting data into a Pandas dataframe
-        df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-        df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-        df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
-
-        gcs_data_cost = []
-
-        for blob_name in list_paths3:
-            gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
-            gcs_data_cost.append(gcs_file_cost)            
-     
-        #Converting data into a Pandas dataframe
-        df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
-        df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
-        df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
-
-        df_data1 = df_data_collected
-        df_data2 = df_data_consumption
-        df_data3 = df_data_cost
+        #if not df_data1:
+        #    flash("There is no data for today. Please collect data first")
+        #    return redirect("/updateday")
 
         #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
         df_data2 = df_data2.drop(columns=['date'])
@@ -351,77 +332,35 @@ def updateday():
                 flash("Please select today or an earlier date")
                 return redirect("/updateday")
 
-            ############################################################
-            # Retrieving files from Google storage for chosen date
-            ############################################################
+            #Reading data from files for chosen date
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                        data_frames.append(df)
+            df_data1 = pd.concat(data_frames, ignore_index=True)
 
-            storage_client = storage.Client()
-            bucket = storage_client.get_bucket(my_bucket)        
-            my_prefix = "Collecteddata/"
-            blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Consumption'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Consumption", file), names=['date', 'start', 'consumption_house', 'consumption_ev'])
+                        data_frames.append(df)
+            df_data2 = pd.concat(data_frames, ignore_index=True)
 
-            list_paths_gcs = []
-
-            for blob in blobs:        
-                if(blob.name != my_prefix):
-                    paths = blob.name.replace(my_prefix, "")            
-                    list_paths_gcs.append(paths)                
-
-            #Filtering out all dates other than current date and making it into a list
-            df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-            df_paths["date"] = df_paths.path.str[0:10]
-            list_chosendata= [chosendate]
-            df_paths = df_paths.query('date in @list_chosendata')        
-            df_paths = df_paths.drop(columns=['date'])                    
-            list_paths2 = df_paths.to_records(index=False)
-            list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-            list_paths3 = list(list_paths2)
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Cost'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Cost", file), names=['date', 'start', 'cost_house', 'cost_ev'])
+                        data_frames.append(df)
+            df_data3 = pd.concat(data_frames, ignore_index=True)
 
             #Flashing message if there is no date
-            if list_paths3 == []:
-                flash("There is no data for selected date. Please collect data first")
-                return redirect("/collectdata")            
-
-            #########################################################
-            # Downloading selected files from Google storage
-            #########################################################
-
-            gcs_data_collected = []
-
-            for blob_name in list_paths3:
-                gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_collected.append(gcs_file_collected)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-            df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-            df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-            gcs_data_consumption = []
-
-            for blob_name in list_paths3:
-                gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_consumption.append(gcs_file_consumption)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-            df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-            df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
-
-            gcs_data_cost = []
-
-            for blob_name in list_paths3:
-                gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_cost.append(gcs_file_cost)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
-            df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
-            df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
-
-            df_data1 = df_data_collected
-            df_data2 = df_data_consumption
-            df_data3 = df_data_cost
+            #if not df_data1:
+            #    flash("There is no data for selected date. Please collect data first")
+            #    return redirect("/updateday")
 
             #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
             df_data2 = df_data2.drop(columns=['date'])
@@ -449,65 +388,27 @@ def updateday():
 
             chosendate = req["chosendate"] 
 
-            #################################################################
-            # Retrieving paths to files for chosen date from Google storage
-            #################################################################
+            #Reading data from files for chosen date
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                        data_frames.append(df)
+            df_data1 = pd.concat(data_frames, ignore_index=True)
 
-            storage_client = storage.Client()
-            bucket = storage_client.get_bucket(my_bucket)        
-            my_prefix = "Collecteddata/"
-            blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Consumption'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Consumption", file), names=['date', 'start', 'consumption_house', 'consumption_ev'])
+                        data_frames.append(df)
+            df_data2 = pd.concat(data_frames, ignore_index=True)
 
-            list_paths_gcs = []
+            data1 = df_data1.values.tolist()
+            data2 = df_data2.values.tolist()            
 
-            for blob in blobs:        
-                if(blob.name != my_prefix):
-                    paths = blob.name.replace(my_prefix, "")            
-                    list_paths_gcs.append(paths)                
-
-            #Filtering out all dates other than current date and making it into a list
-            df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-            df_paths["date"] = df_paths.path.str[0:10]
-            list_chosendata= [chosendate]
-            df_paths = df_paths.query('date in @list_chosendata')        
-            df_paths = df_paths.drop(columns=['date'])                    
-            list_paths2 = df_paths.to_records(index=False)
-            list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-            list_paths3 = list(list_paths2)
-
-            #########################################################
-            # Downloading selected files from Google storage
-            #########################################################
-
-            gcs_data_collected = []
-
-            for blob_name in list_paths3:
-                gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_collected.append(gcs_file_collected)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-            df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-            df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-            gcs_data_consumption = []
-
-            for blob_name in list_paths3:
-                gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_consumption.append(gcs_file_consumption)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-            df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-            df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
-
-            data1 = df_data_collected.values.tolist()
-            data2 = df_data_consumption.values.tolist()
-
-            #########################################################
-            # Creating variables from the form dictionary 
-            #########################################################
-
+            #Creating variables from the form dictionary
             if req.get("cons_ev00") != None:            
                 cons_ev00 = float(req["cons_ev00"])           
             if req.get("cons_ev01") != None: 
@@ -803,13 +704,6 @@ def updateday():
                 cost_ev23 = round((float(data1[23][3])*cons_ev23), 3)                 
 
 
-            ###########################################################
-            # Storing updated data in Google storage / on local drive
-            ###########################################################
-
-            storage_client = storage.Client()
-            bucket = storage_client.get_bucket(my_bucket)        
-
             if start00 != None:
 
                 date00 = start00[0:10]
@@ -822,21 +716,17 @@ def updateday():
                 df_consumption00 = pd.DataFrame((consumption00), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost00 = pd.DataFrame((cost00), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data00 = df_collected_data00.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data00.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data00.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption00.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption00 = df_consumption00.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption00.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost00 = df_cost00.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost00.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost00.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start01 != None:
 
@@ -849,23 +739,18 @@ def updateday():
                 df_collected_data01 = pd.DataFrame((collected_data01), columns=['date', 'start', 'stop', 'price', 'cons', 'cost', 'filename'])        
                 df_consumption01 = pd.DataFrame((consumption01), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost01 = pd.DataFrame((cost01), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
- 
-                # Storing in Google storage
-                df_collected_data01 = df_collected_data01.reset_index()  # make sure indexes pair with number of rows
 
-                for index, row in df_collected_data01.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_collected_data01.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                df_consumption01 = df_consumption01.reset_index()  # make sure indexes pair with number of rows
+                for row in df_consumption01.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_consumption01.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost01 = df_cost01.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost01.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
+                for row in df_cost01.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start02 != None:
 
@@ -878,22 +763,18 @@ def updateday():
                 df_collected_data02 = pd.DataFrame((collected_data02), columns=['date', 'start', 'stop', 'price', 'cons', 'cost', 'filename'])        
                 df_consumption02 = pd.DataFrame((consumption02), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost02 = pd.DataFrame((cost02), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
- 
-                # Storing in Google storage
-                df_collected_data02 = df_collected_data02.reset_index()  # make sure indexes pair with number of rows
 
-                for index, row in df_collected_data02.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_collected_data02.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                df_consumption02 = df_consumption02.reset_index()  # make sure indexes pair with number of rows
+                for row in df_consumption02.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_consumption02.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost02 = df_cost02.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost02.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost02.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")                    
 
             if start03 != None:
 
@@ -906,22 +787,18 @@ def updateday():
                 df_collected_data03 = pd.DataFrame((collected_data03), columns=['date', 'start', 'stop', 'price', 'cons', 'cost', 'filename'])        
                 df_consumption03 = pd.DataFrame((consumption03), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost03 = pd.DataFrame((cost03), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
- 
-                # Storing in Google storage
-                df_collected_data03 = df_collected_data03.reset_index()  # make sure indexes pair with number of rows
 
-                for index, row in df_collected_data03.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_collected_data03.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                df_consumption03 = df_consumption03.reset_index()  # make sure indexes pair with number of rows
+                for row in df_consumption03.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_consumption03.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost03 = df_cost03.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost03.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost03.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start04 != None:
 
@@ -935,21 +812,18 @@ def updateday():
                 df_consumption04 = pd.DataFrame((consumption04), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost04 = pd.DataFrame((cost04), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data04 = df_collected_data04.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data04.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data04.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
 
-                df_consumption04 = df_consumption04.reset_index()  # make sure indexes pair with number of rows
+                for row in df_consumption04.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_consumption04.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost04 = df_cost04.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost04.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')                    
+                for row in df_cost04.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start05 != None:
 
@@ -963,21 +837,17 @@ def updateday():
                 df_consumption05 = pd.DataFrame((consumption05), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost05 = pd.DataFrame((cost05), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data05 = df_collected_data05.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data05.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data05.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption05.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption05 = df_consumption05.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption05.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost05 = df_cost05.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost05.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost05.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start06 != None:
 
@@ -991,21 +861,17 @@ def updateday():
                 df_consumption06 = pd.DataFrame((consumption06), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost06 = pd.DataFrame((cost06), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data06 = df_collected_data06.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data06.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data06.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption06.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption06 = df_consumption06.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption06.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost06 = df_cost06.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost06.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost06.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")                    
 
             if start07 != None:
 
@@ -1019,21 +885,17 @@ def updateday():
                 df_consumption07 = pd.DataFrame((consumption07), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost07 = pd.DataFrame((cost07), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data07 = df_collected_data07.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data07.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data07.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption07.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption07 = df_consumption07.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption07.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost07 = df_cost07.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost07.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost07.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start08 != None:
 
@@ -1047,21 +909,17 @@ def updateday():
                 df_consumption08 = pd.DataFrame((consumption08), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost08 = pd.DataFrame((cost08), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data08 = df_collected_data08.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data08.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data08.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption08.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption08 = df_consumption08.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption08.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost08 = df_cost08.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost08.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost08.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start09 != None:
 
@@ -1075,21 +933,17 @@ def updateday():
                 df_consumption09 = pd.DataFrame((consumption09), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost09 = pd.DataFrame((cost09), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data09 = df_collected_data09.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data09.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data09.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption09.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption09 = df_consumption09.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption09.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost09 = df_cost09.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost09.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost09.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start10 != None:
 
@@ -1103,21 +957,17 @@ def updateday():
                 df_consumption10 = pd.DataFrame((consumption10), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost10 = pd.DataFrame((cost10), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data10 = df_collected_data10.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data10.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data10.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption10.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption10 = df_consumption10.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption10.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost10 = df_cost10.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost10.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost10.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start11 != None:
 
@@ -1130,23 +980,19 @@ def updateday():
                 df_collected_data11 = pd.DataFrame((collected_data11), columns=['date', 'start', 'stop', 'price', 'cons', 'cost', 'filename'])        
                 df_consumption11 = pd.DataFrame((consumption11), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost11 = pd.DataFrame((cost11), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
+
+                for row in df_collected_data11.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
+
+                for row in df_consumption11.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
+
+                for row in df_cost11.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
                     
-                # Storing in Google storage
-                df_collected_data11 = df_collected_data11.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_collected_data11.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
-
-                df_consumption11 = df_consumption11.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption11.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost11 = df_cost11.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost11.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
             if start12 != None:
 
                 date12 = start12[0:10]
@@ -1159,21 +1005,17 @@ def updateday():
                 df_consumption12 = pd.DataFrame((consumption12), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost12 = pd.DataFrame((cost12), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data12 = df_collected_data12.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data12.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data12.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption12.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption12 = df_consumption12.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption12.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost12 = df_cost12.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost12.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost12.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start13 != None:
 
@@ -1187,21 +1029,17 @@ def updateday():
                 df_consumption13 = pd.DataFrame((consumption13), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost13 = pd.DataFrame((cost13), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data13 = df_collected_data13.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data13.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data13.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption13.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption13 = df_consumption13.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption13.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost13 = df_cost13.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost13.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost13.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start14 != None:
 
@@ -1215,21 +1053,17 @@ def updateday():
                 df_consumption14 = pd.DataFrame((consumption14), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost14 = pd.DataFrame((cost14), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data14 = df_collected_data14.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data14.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data14.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption14.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption14 = df_consumption14.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption14.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost14 = df_cost14.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost14.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost14.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start15 != None:
 
@@ -1243,21 +1077,17 @@ def updateday():
                 df_consumption15 = pd.DataFrame((consumption15), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost15 = pd.DataFrame((cost15), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data15 = df_collected_data15.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data15.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data15.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption15.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption15 = df_consumption15.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption15.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost15 = df_cost15.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost15.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost15.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start16 != None:
 
@@ -1271,21 +1101,17 @@ def updateday():
                 df_consumption16 = pd.DataFrame((consumption16), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost16 = pd.DataFrame((cost16), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data16 = df_collected_data16.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data16.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data16.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption16.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption16 = df_consumption16.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption16.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost16 = df_cost16.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost16.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost16.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start17 != None:
 
@@ -1299,21 +1125,17 @@ def updateday():
                 df_consumption17 = pd.DataFrame((consumption17), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost17 = pd.DataFrame((cost17), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data17 = df_collected_data17.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data17.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data17.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption17.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption17 = df_consumption17.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption17.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost17 = df_cost17.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost17.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost17.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start18 != None:
 
@@ -1327,21 +1149,17 @@ def updateday():
                 df_consumption18 = pd.DataFrame((consumption18), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost18 = pd.DataFrame((cost18), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data18 = df_collected_data18.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data18.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data18.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption18.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption18 = df_consumption18.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption18.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost18 = df_cost18.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost18.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost18.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start19 != None:
 
@@ -1355,21 +1173,17 @@ def updateday():
                 df_consumption19 = pd.DataFrame((consumption19), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost19 = pd.DataFrame((cost19), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data19 = df_collected_data19.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data19.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data19.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption19.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption19 = df_consumption19.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption19.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost19 = df_cost19.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost19.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost19.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start20 != None:
 
@@ -1383,21 +1197,17 @@ def updateday():
                 df_consumption20 = pd.DataFrame((consumption20), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost20 = pd.DataFrame((cost20), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data20 = df_collected_data20.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data20.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data20.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption20.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption20 = df_consumption20.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption20.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost20 = df_cost20.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost20.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost20.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start21 != None:
 
@@ -1411,21 +1221,17 @@ def updateday():
                 df_consumption21 = pd.DataFrame((consumption21), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost21 = pd.DataFrame((cost21), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data21 = df_collected_data21.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data21.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data21.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption21.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption21 = df_consumption21.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption21.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost21 = df_cost21.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost21.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost21.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start22 != None:
 
@@ -1439,21 +1245,17 @@ def updateday():
                 df_consumption22 = pd.DataFrame((consumption22), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost22 = pd.DataFrame((cost22), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data22 = df_collected_data22.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data22.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data22.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption22.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption22 = df_consumption22.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_consumption22.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
-
-                df_cost22 = df_cost22.reset_index()  # make sure indexes pair with number of rows
-
-                for index, row in df_cost22.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
+                for row in df_cost22.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
             if start23 != None:
 
@@ -1467,88 +1269,45 @@ def updateday():
                 df_consumption23 = pd.DataFrame((consumption23), columns=['date', 'start', 'cons_house', 'cons_ev', 'filename'])        
                 df_cost23 = pd.DataFrame((cost23), columns=['date', 'start', 'cost_house', 'cost_ev', 'filename'])                                        
 
-                # Storing in Google storage
-                df_collected_data23 = df_collected_data23.reset_index()  # make sure indexes pair with number of rows
+                for row in df_collected_data23.reset_index().values:
+                    filename = '/Data/Bucket/Collecteddata/{}.csv'.format(row[7])
+                    row[1:7].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_collected_data23.iterrows():
-                    bucket.blob('Collecteddata/{}.csv'.format(row[7])).upload_from_string(row[1:7].to_csv(header=False, index=False), 'text/csv')
+                for row in df_consumption23.reset_index().values:
+                    filename = '/Data/Bucket/Consumption/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                df_consumption23 = df_consumption23.reset_index()  # make sure indexes pair with number of rows
+                for row in df_cost23.reset_index().values:
+                    filename = '/Data/Bucket/Cost/{}.csv'.format(row[5])
+                    row[1:5].tofile(filename, sep=",", format="%s")
 
-                for index, row in df_consumption23.iterrows():
-                    bucket.blob('Consumption/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
 
-                df_cost23 = df_cost23.reset_index()  # make sure indexes pair with number of rows
 
-                for index, row in df_cost23.iterrows():
-                    bucket.blob('Cost/{}.csv'.format(row[5])).upload_from_string(row[1:5].to_csv(header=False, index=False), 'text/csv')
 
-            ############################################################
-            # Retrieving files from Google storage for chosen date
-            ############################################################
+            #Reading data from files for chosen date
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                        data_frames.append(df)
+            df_data1 = pd.concat(data_frames, ignore_index=True)
 
-            storage_client = storage.Client()
-            bucket = storage_client.get_bucket(my_bucket)        
-            my_prefix = "Collecteddata/"
-            blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Consumption'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Consumption", file), names=['date', 'start', 'consumption_house', 'consumption_ev'])
+                        data_frames.append(df)
+            df_data2 = pd.concat(data_frames, ignore_index=True)
 
-            list_paths_gcs = []
-
-            for blob in blobs:        
-                if(blob.name != my_prefix):
-                    paths = blob.name.replace(my_prefix, "")            
-                    list_paths_gcs.append(paths)                
-
-            #Filtering out all dates other than current date and making it into a list
-            df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-            df_paths["date"] = df_paths.path.str[0:10]
-            list_chosendata= [chosendate]
-            df_paths = df_paths.query('date in @list_chosendata')        
-            df_paths = df_paths.drop(columns=['date'])                    
-            list_paths2 = df_paths.to_records(index=False)
-            list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-            list_paths3 = list(list_paths2)
-
-            #########################################################
-            # Downloading selected files from Google storage
-            #########################################################
-
-            gcs_data_collected = []
-
-            for blob_name in list_paths3:
-                gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_collected.append(gcs_file_collected)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-            df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-            df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-            gcs_data_consumption = []
-
-            for blob_name in list_paths3:
-                gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_consumption.append(gcs_file_consumption)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-            df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-            df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
-
-            gcs_data_cost = []
-
-            for blob_name in list_paths3:
-                gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
-                gcs_data_cost.append(gcs_file_cost)            
-        
-            #Converting data into a Pandas dataframe
-            df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
-            df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
-            df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
-
-            df_data1 = df_data_collected
-            df_data2 = df_data_consumption
-            df_data3 = df_data_cost
+            data_frames = []
+            for root, dirs, files in os.walk(r'\Data\Bucket\Cost'):
+                for file in files:
+                    if file.startswith(chosendate):
+                        df = pd.read_csv(os.path.join("\Data\Bucket\Cost", file), names=['date', 'start', 'cost_house', 'cost_ev'])
+                        data_frames.append(df)
+            df_data3 = pd.concat(data_frames, ignore_index=True)
 
             #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
             df_data2 = df_data2.drop(columns=['date'])
@@ -1591,80 +1350,41 @@ def viewamonth():
         monthtoshow=chosenmonth
         chosenmonth = chosenmonth
 
-    ############################################################
-    # Retrieving files from Google storage for chosen date
-    ############################################################
-
-    storage_client = storage.Client()
-    bucket = storage_client.get_bucket(my_bucket)        
-    my_prefix = "Collecteddata/"
-    blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
-
-    list_paths_gcs = []
-
-    for blob in blobs:        
-        if(blob.name != my_prefix):
-            paths = blob.name.replace(my_prefix, "")            
-            list_paths_gcs.append(paths)                
-
-    #Retrieving all filenames and making then into a list of months
-    df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-    df_paths["month"] = df_paths.path.str[0:7]
-    df_months = df_paths.drop(columns=['path'])
-    df_months = df_months.drop_duplicates(subset=['month'])                          
-    months = df_months.to_records(index=False)
-    months_list = list(months)
+    #Getting all filenames collected and make them into a list
+    entries = os.listdir('/Data/Bucket/Consumption/')
+    df_entries = pd.DataFrame((entries), columns=['filename'])        
+    df_entries["month"] = df_entries.filename.str[0:7]
+    df_entries = df_entries.drop(columns=['filename'])            
+    df_entries = df_entries.drop_duplicates(subset=['month'])    
+    records = df_entries.to_records(index=False)
+    months_list = list(records)
     months_list  = [tupleObj[0] for tupleObj in months_list]    
     months_list.sort(reverse=True)    
 
-    #Retrieving all filenames and making then into a list of available files
-    list_chosenmonth= [chosenmonth]
-    df_paths = df_paths.query('month in @list_chosenmonth')        
-    df_paths = df_paths.drop(columns=['month'])                    
-    list_paths2 = df_paths.to_records(index=False)
-    list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-    list_paths3 = list(list_paths2)    
+    #Reading data from files for chosen month
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+        for file in files:
+            if file.startswith(chosenmonth):
+                df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                data_frames.append(df)
+    df_data1 = pd.concat(data_frames, ignore_index=True)
 
-    #########################################################
-    # Downloading selected files from Google storage
-    #########################################################
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Consumption'):
+        for file in files:
+            if file.startswith(chosenmonth):
+                df = pd.read_csv(os.path.join("\Data\Bucket\Consumption", file), names=['date', 'start', 'consumption_house', 'consumption_ev'])
+                data_frames.append(df)
+    df_data2 = pd.concat(data_frames, ignore_index=True)
 
-    gcs_data_collected = []
-
-    for blob_name in list_paths3:
-        gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_data_collected.append(gcs_file_collected)            
-
-    #Converting data into a Pandas dataframe
-    df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-    df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-    df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-    gcs_data_consumption = []
-
-    for blob_name in list_paths3:
-        gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_data_consumption.append(gcs_file_consumption)            
-
-    #Converting data into a Pandas dataframe
-    df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-    df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-    df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
-
-    gcs_data_cost = []
-
-    for blob_name in list_paths3:
-        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_data_cost.append(gcs_file_cost)            
-
-    #Converting data into a Pandas dataframe
-    df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
-    df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
-    df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
-
-    df_data1 = df_data_collected
-    df_data2 = df_data_consumption
-    df_data3 = df_data_cost
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Cost'):
+        for file in files:
+            if file.startswith(chosenmonth):
+                df = pd.read_csv(os.path.join("\Data\Bucket\Cost", file), names=['date', 'start', 'cost_house', 'cost_ev'])
+                data_frames.append(df)
+    df_data3 = pd.concat(data_frames, ignore_index=True)
 
     #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
     df_data1['cost'] = df_data1['cost'].astype(float)
@@ -1728,80 +1448,41 @@ def totalcostmonth():
         flash("You have to first input fixed cost to get total costs a given month!")
         return redirect("/setup")
 
-    ############################################################
-    # Retrieving files from Google storage for chosen date
-    ############################################################
-
-    storage_client = storage.Client()
-    bucket = storage_client.get_bucket(my_bucket)        
-    my_prefix = "Collecteddata/"
-    blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
-
-    list_paths_gcs = []
-
-    for blob in blobs:        
-        if(blob.name != my_prefix):
-            paths = blob.name.replace(my_prefix, "")            
-            list_paths_gcs.append(paths)                
-
-    #Retrieving all filenames and making then into a list of months
-    df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-    df_paths["month"] = df_paths.path.str[0:7]
-    df_months = df_paths.drop(columns=['path'])
-    df_months = df_months.drop_duplicates(subset=['month'])                          
-    months = df_months.to_records(index=False)
-    months_list = list(months)
+    #Getting all filenames collected and make them into a list
+    entries = os.listdir('/Data/Bucket/Consumption/')
+    df_entries = pd.DataFrame((entries), columns=['filename'])        
+    df_entries["month"] = df_entries.filename.str[0:7]
+    df_entries = df_entries.drop(columns=['filename'])            
+    df_entries = df_entries.drop_duplicates(subset=['month'])    
+    records = df_entries.to_records(index=False)
+    months_list = list(records)
     months_list  = [tupleObj[0] for tupleObj in months_list]    
     months_list.sort(reverse=True)    
 
-    #Retrieving all filenames and making then into a list of available files
-    list_chosenmonth= [costmonth]
-    df_paths = df_paths.query('month in @list_chosenmonth')        
-    df_paths = df_paths.drop(columns=['month'])                    
-    list_paths2 = df_paths.to_records(index=False)
-    list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-    list_paths3 = list(list_paths2)    
+    #Reading data from files for chosen month
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+        for file in files:
+            if file.startswith(costmonth):
+                df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                data_frames.append(df)
+    df_data1 = pd.concat(data_frames, ignore_index=True)
 
-    #########################################################
-    # Downloading selected files from Google storage
-    #########################################################
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Consumption'):
+        for file in files:
+            if file.startswith(costmonth):
+                df = pd.read_csv(os.path.join("\Data\Bucket\Consumption", file), names=['date', 'start', 'consumption_house', 'consumption_ev'])
+                data_frames.append(df)
+    df_data2 = pd.concat(data_frames, ignore_index=True)
 
-    gcs_data_collected = []
-
-    for blob_name in list_paths3:
-        gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_data_collected.append(gcs_file_collected)            
-
-    #Converting data into a Pandas dataframe
-    df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-    df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-    df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-    gcs_data_consumption = []
-
-    for blob_name in list_paths3:
-        gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_data_consumption.append(gcs_file_consumption)            
-
-    #Converting data into a Pandas dataframe
-    df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-    df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-    df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
-
-    gcs_data_cost = []
-
-    for blob_name in list_paths3:
-        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_data_cost.append(gcs_file_cost)            
-
-    #Converting data into a Pandas dataframe
-    df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
-    df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
-    df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
-
-    df_data1 = df_data_collected
-    df_data2 = df_data_consumption
-    df_data3 = df_data_cost        
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Cost'):
+        for file in files:
+            if file.startswith(costmonth):
+                df = pd.read_csv(os.path.join("\Data\Bucket\Cost", file), names=['date', 'start', 'cost_house', 'cost_ev'])
+                data_frames.append(df)
+    df_data3 = pd.concat(data_frames, ignore_index=True)    
 
     #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
     df_data1['cost'] = df_data1['cost'].astype(float)
@@ -1916,160 +1597,72 @@ def viewconsumption():
 @app.route("/viewprices", methods=["GET", "POST"])
 def viewprices():
 
-    storage_client = storage.Client()
-    bucket = storage_client.get_bucket(my_bucket)        
-
     if request.method == "GET":
 
-        # Retrieving deciles file from Google Storage
-        deciles = bucket.get_blob('deciles.csv').download_as_text()
-
-        df_deciles = pd.DataFrame([x.split(',') for x in deciles.split('\r\n')])
-        df_deciles.columns = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
-        df_deciles = df_deciles.drop(df_deciles.index[[10]])
-        df_deciles['max'] = df_deciles['max'].astype(float)  
-
-        #Creating new objects for min and max values
-        max_0 = df_deciles.at[0, 'max']
-        max_1 = df_deciles.at[1, 'max']        
-        max_2 = df_deciles.at[2, 'max']        
-        max_3 = df_deciles.at[3, 'max']
-        max_6 = df_deciles.at[6, 'max']
-        max_7 = df_deciles.at[7, 'max']        
-        max_8 = df_deciles.at[8, 'max']
-
-        #Function for rating the energy price
-        def rating(value):
-            if value <= max_0:
-                return "Very cheap"
-            elif max_0 < value <= max_1:
-                return "Very cheap"
-            elif max_1 < value <= max_2:
-                return "Cheap"                
-            elif max_2 < value <= max_6:
-                return "Normal"
-            elif max_6 < value <= max_7:
-                return "Expensive"
-            elif max_7 < value <= max_8:
-                return "Very expensive"
-            elif value > max_8:
-                return "Very expensive"
-
-        decile = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
-        rate = ['Very cheap', 'Very cheap', 'Cheap', 'Cheap', 'Normal', 'Normal', 'Expensive', 'Expensive', 'Very expensive', 'Very expensive']        
-        df_deciles['decile'] = decile
-        df_deciles['rating'] = rate
-
-        #Converting the dataframe into a list of tuples
-        deciles = df_deciles.values.tolist()
-
-        #Calculating the number of days the rating is based on
-        df_days = df_deciles[['count']]
-        df_days['count'] = df_days['count'].astype(float)
-        df_days = df_days.agg(['sum'])
-        days = df_days.values.tolist()        
-        numberofdays = round(days[0][0]/24, 0)
-       
+        numberofdays = 90
 
     if request.method == "POST":
 
         req = request.form
         numberofdays = float(req["numberofdays"])
 
-        #Calculating the date 180 days prior to today
-        fromdate = date.today() - relativedelta(days=+numberofdays)
-        fromdate = fromdate.strftime("%Y-%m-%d") 
+    #Calculating the date 180 days prior to today
+    fromdate = date.today() - relativedelta(days=+numberofdays)
+    fromdate = fromdate.strftime("%Y-%m-%d") 
 
-        ############################################################
-        # Retrieving files from Google storage for chosen date
-        ############################################################
+    #Reading data from files for chosen month
+    data_frames = []
+    for root, dirs, files in os.walk(r'\Data\Bucket\Collecteddata'):
+        for file in files:
+            if file > fromdate:
+                df = pd.read_csv(os.path.join("\Data\Bucket\Collecteddata", file), names=['date', 'start', 'stop', 'price', 'consumption', 'cost'])
+                data_frames.append(df)
+    df_data1 = pd.concat(data_frames, ignore_index=True)
 
-        my_prefix = "Collecteddata/"
-        blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+    #Converting the list of tuples into a dataframe
+    df_allprices = df_data1.drop(columns=['start', 'stop', 'consumption', 'cost'])    
+    mean_price = df_allprices['price'].mean()
 
-        list_paths_gcs = []
+    #Sorting data by ascending price and deviding into ten groups of equal size
+    df_allprices = df_allprices.sort_values('price', ascending=True)
+    df_allprices['Tengroups'] = pd.qcut(df_allprices['price'], 10, labels = False)        
 
-        for blob in blobs:        
-            if(blob.name != my_prefix):
-                paths = blob.name.replace(my_prefix, "")            
-                list_paths_gcs.append(paths)                
+    #Calculating the min and max value and more for each group
+    df_deciles = df_allprices.set_index("Tengroups").select_dtypes(np.number).stack().groupby(level=0).describe()         
 
-        #Retrieving all filenames and making then into a list of months
-        df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-        df_paths["date"] = df_paths.path.str[0:10]
-        list_fromdate= [fromdate]
-        df_paths = df_paths[df_paths.date > fromdate]
-        df_paths = df_paths.drop(columns=['date'])                    
-        list_paths2 = df_paths.to_records(index=False)
-        list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-        list_paths3 = list(list_paths2)    
+    #Creating new objects for min and max values
+    max_0 = df_deciles.at[0, 'max']
+    max_1 = df_deciles.at[1, 'max']        
+    max_2 = df_deciles.at[2, 'max']        
+    max_3 = df_deciles.at[3, 'max']
+    max_6 = df_deciles.at[6, 'max']
+    max_7 = df_deciles.at[7, 'max']        
+    max_8 = df_deciles.at[8, 'max']
 
-        #########################################################
-        # Downloading selected files from Google storage
-        #########################################################
+    #Function for rating the energy price
+    def rating(value):
+        if value <= max_0:
+            return "Very cheap"
+        elif max_0 < value <= max_1:
+            return "Very cheap"
+        elif max_1 < value <= max_2:
+            return "Cheap"                
+        elif max_2 < value <= max_6:
+            return "Normal"
+        elif max_6 < value <= max_7:
+            return "Expensive"
+        elif max_7 < value <= max_8:
+            return "Very expensive"
+        elif value > max_8:
+            return "Very expensive"
 
-        gcs_data_collected = []
+    decile = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
+    rate = ['Very cheap', 'Very cheap', 'Cheap', 'Cheap', 'Normal', 'Normal', 'Expensive', 'Expensive', 'Very expensive', 'Very expensive']        
+    df_deciles['decile'] = decile
+    df_deciles['rating'] = rate        
 
-        for blob_name in list_paths3:
-            gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-            gcs_data_collected.append(gcs_file_collected)            
-
-        #Converting data into a Pandas dataframe
-        df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-        df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-        df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
-
-        df_data1 = df_data_collected
-
-        #Converting the list of tuples into a dataframe
-        df_allprices = df_data1.drop(columns=['start', 'stop', 'consumption', 'cost'])    
-        df_allprices['price'] = df_allprices['price'].astype(float)    
-        mean_price = df_allprices['price'].mean()
-
-        #Sorting data by ascending price and deviding into ten groups of equal size
-        df_allprices = df_allprices.sort_values('price', ascending=True)
-        df_allprices['Tengroups'] = pd.qcut(df_allprices['price'], 10, labels = False)        
-
-        #Calculating the min and max value and more for each group
-        df_deciles = df_allprices.set_index("Tengroups").select_dtypes(np.number).stack().groupby(level=0).describe()         
-
-        #Saving rating in Google storage
-        bucket.blob('deciles.csv').upload_from_string(df_deciles.to_csv(header=False, index=False), 'text/csv')
-
-        #Creating new objects for min and max values
-        max_0 = df_deciles.at[0, 'max']
-        max_1 = df_deciles.at[1, 'max']        
-        max_2 = df_deciles.at[2, 'max']        
-        max_3 = df_deciles.at[3, 'max']
-        max_6 = df_deciles.at[6, 'max']
-        max_7 = df_deciles.at[7, 'max']        
-        max_8 = df_deciles.at[8, 'max']
-
-        #Function for rating the energy price
-        def rating(value):
-            if value <= max_0:
-                return "Very cheap"
-            elif max_0 < value <= max_1:
-                return "Very cheap"
-            elif max_1 < value <= max_2:
-                return "Cheap"                
-            elif max_2 < value <= max_6:
-                return "Normal"
-            elif max_6 < value <= max_7:
-                return "Expensive"
-            elif max_7 < value <= max_8:
-                return "Very expensive"
-            elif value > max_8:
-                return "Very expensive"
-
-        decile = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
-        rate = ['Very cheap', 'Very cheap', 'Cheap', 'Cheap', 'Normal', 'Normal', 'Expensive', 'Expensive', 'Very expensive', 'Very expensive']        
-        df_deciles['decile'] = decile
-        df_deciles['rating'] = rate
-
-        #Converting the dataframe into a list of tuples
-        deciles = df_deciles.values.tolist()
-
+    #Converting the dataframe into a list of tuples
+    deciles = df_deciles.values.tolist()
 
     ################################################################
     # Collecting energy prices for today and tomorrow from Tibber
@@ -2078,7 +1671,9 @@ def viewprices():
     account=tibber.Account(tibber_token)
     home = account.homes[0]
     current_subscription = home.current_subscription
+    #price_info = current_subscription.price_info
     price_now = current_subscription.price_info.current.total
+    #price_nordpool = current_subscription.price_info.current.energy
     price_level = current_subscription.price_info.current.level
     price_info_today = current_subscription.price_info.today
     price_info_tomorrow = current_subscription.price_info.tomorrow
