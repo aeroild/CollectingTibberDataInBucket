@@ -276,7 +276,8 @@ def updateday():
         gcs_data_collected = []
 
         for blob_name in list_paths3:
-            gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+            gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")
+            gcs_file_collected = gcs_file_collected.replace("\n", ",")           
             gcs_data_collected.append(gcs_file_collected)            
      
         #Converting data into a Pandas dataframe
@@ -287,7 +288,8 @@ def updateday():
         gcs_data_consumption = []
 
         for blob_name in list_paths3:
-            gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+            gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")
+            gcs_file_consumption = gcs_file_consumption.replace("\n", ",")                           
             gcs_data_consumption.append(gcs_file_consumption)            
      
         #Converting data into a Pandas dataframe
@@ -298,7 +300,8 @@ def updateday():
         gcs_data_cost = []
 
         for blob_name in list_paths3:
-            gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
+            gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")  
+            gcs_file_cost = gcs_file_cost.replace("\n", ",")                     
             gcs_data_cost.append(gcs_file_cost)            
      
         #Converting data into a Pandas dataframe
@@ -390,6 +393,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_collected = gcs_file_collected.replace("\n", ",")   
                 gcs_data_collected.append(gcs_file_collected)            
         
             #Converting data into a Pandas dataframe
@@ -401,6 +405,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_consumption = gcs_file_consumption.replace("\n", ",")                
                 gcs_data_consumption.append(gcs_file_consumption)            
         
             #Converting data into a Pandas dataframe
@@ -411,7 +416,8 @@ def updateday():
             gcs_data_cost = []
 
             for blob_name in list_paths3:
-                gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")   
+                gcs_file_cost = gcs_file_cost.replace("\n", ",")                           
                 gcs_data_cost.append(gcs_file_cost)            
         
             #Converting data into a Pandas dataframe
@@ -483,6 +489,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_collected = gcs_file_collected.replace("\n", ",")                   
                 gcs_data_collected.append(gcs_file_collected)            
         
             #Converting data into a Pandas dataframe
@@ -494,6 +501,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_consumption = gcs_file_consumption.replace("\n", ",")                
                 gcs_data_consumption.append(gcs_file_consumption)            
         
             #Converting data into a Pandas dataframe
@@ -1517,6 +1525,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_collected = gcs_file_collected.replace("\n", ",")                   
                 gcs_data_collected.append(gcs_file_collected)            
         
             #Converting data into a Pandas dataframe
@@ -1528,6 +1537,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_consumption = gcs_file_consumption.replace("\n", ",")                
                 gcs_data_consumption.append(gcs_file_consumption)            
         
             #Converting data into a Pandas dataframe
@@ -1539,6 +1549,7 @@ def updateday():
 
             for blob_name in list_paths3:
                 gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
+                gcs_file_cost = gcs_file_cost.replace("\n", ",")  
                 gcs_data_cost.append(gcs_file_cost)            
         
             #Converting data into a Pandas dataframe
@@ -1633,6 +1644,7 @@ def viewamonth():
 
     for blob_name in list_paths3:
         gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+        gcs_file_collected = gcs_file_collected.replace("\n", ",")           
         gcs_data_collected.append(gcs_file_collected)            
 
     #Converting data into a Pandas dataframe
@@ -1644,6 +1656,7 @@ def viewamonth():
 
     for blob_name in list_paths3:
         gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+        gcs_file_consumption = gcs_file_consumption.replace("\n", ",")        
         gcs_data_consumption.append(gcs_file_consumption)            
 
     #Converting data into a Pandas dataframe
@@ -1654,7 +1667,8 @@ def viewamonth():
     gcs_data_cost = []
 
     for blob_name in list_paths3:
-        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
+        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")       
+        gcs_file_cost = gcs_file_cost.replace("\n", ",")               
         gcs_data_cost.append(gcs_file_cost)            
 
     #Converting data into a Pandas dataframe
@@ -1769,7 +1783,8 @@ def totalcostmonth():
     gcs_data_collected = []
 
     for blob_name in list_paths3:
-        gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+        gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",") 
+        gcs_file_collected = gcs_file_collected.replace("\n", ",")                      
         gcs_data_collected.append(gcs_file_collected)            
 
     #Converting data into a Pandas dataframe
@@ -1781,6 +1796,7 @@ def totalcostmonth():
 
     for blob_name in list_paths3:
         gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+        gcs_file_consumption = gcs_file_consumption.replace("\n", ",")        
         gcs_data_consumption.append(gcs_file_consumption)            
 
     #Converting data into a Pandas dataframe
@@ -1791,7 +1807,8 @@ def totalcostmonth():
     gcs_data_cost = []
 
     for blob_name in list_paths3:
-        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")            
+        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")  
+        gcs_file_cost = gcs_file_cost.replace("\n", ",")                    
         gcs_data_cost.append(gcs_file_cost)            
 
     #Converting data into a Pandas dataframe
@@ -2012,6 +2029,7 @@ def viewprices():
 
         for blob_name in list_paths3:
             gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+            gcs_file_collected = gcs_file_collected.replace("\n", ",")               
             gcs_data_collected.append(gcs_file_collected)            
 
         #Converting data into a Pandas dataframe
