@@ -132,6 +132,12 @@ def datacollected():
             data3=(f"{hour.unit_price}{hour.currency}")
             data4=(hour.consumption)
             data5=(hour.cost)
+
+            if data4 == None:
+                data4 = 0
+            if data5 == None:
+                data5 = 0                       
+
             start.append(data1)
             stop.append(data2)
             price.append(data3)
@@ -261,8 +267,8 @@ def updateday():
         df_paths = df_paths.query('date in @list_chosendata')        
         df_paths = df_paths.drop(columns=['date'])                    
         list_paths2 = df_paths.to_records(index=False)
-        list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-        list_paths3 = list(list_paths2)
+        list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+        #list_paths3 = list(list_paths2)
 
         #Flashing message if there is no date
         if list_paths3 == []:
@@ -377,8 +383,8 @@ def updateday():
             df_paths = df_paths.query('date in @list_chosendata')        
             df_paths = df_paths.drop(columns=['date'])                    
             list_paths2 = df_paths.to_records(index=False)
-            list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-            list_paths3 = list(list_paths2)
+            list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+            #list_paths3 = list(list_paths2)
 
             #Flashing message if there is no date
             if list_paths3 == []:
@@ -478,8 +484,8 @@ def updateday():
             df_paths = df_paths.query('date in @list_chosendata')        
             df_paths = df_paths.drop(columns=['date'])                    
             list_paths2 = df_paths.to_records(index=False)
-            list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-            list_paths3 = list(list_paths2)
+            list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+            #list_paths3 = list(list_paths2)
 
             #########################################################
             # Downloading selected files from Google storage
@@ -1514,8 +1520,8 @@ def updateday():
             df_paths = df_paths.query('date in @list_chosendata')        
             df_paths = df_paths.drop(columns=['date'])                    
             list_paths2 = df_paths.to_records(index=False)
-            list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-            list_paths3 = list(list_paths2)
+            list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+            #list_paths3 = list(list_paths2)
 
             #########################################################
             # Downloading selected files from Google storage
@@ -1594,13 +1600,19 @@ def viewamonth():
         chosenmonth = date_time.strftime("%Y-%m")
         monthtoshow=chosenmonth
         chosenmonth = chosenmonth
+        action = None
     
     if request.method == "POST":
         
         req = request.form
-        chosenmonth=req["chosenmonth"]
+        chosenmonth=req.get("chosenmonth")
+        chosenmonth2 = req.get("chosenmonth2")
+        action=req.get("action")        
         monthtoshow=chosenmonth
         chosenmonth = chosenmonth
+    
+        if action == 'Renew monthly data':
+            chosenmonth = chosenmonth2
 
     ############################################################
     # Retrieving files from Google storage for chosen date
@@ -1608,103 +1620,171 @@ def viewamonth():
 
     storage_client = storage.Client()
     bucket = storage_client.get_bucket(my_bucket)        
-    my_prefix = "Collecteddata/"
-    blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
 
-    list_paths_gcs = []
+    # Check if monthly data is stored
+    my_prefix = "Monthly/"
+    blobs_monthly = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
 
-    for blob in blobs:        
+    list_paths_monthly = []
+
+    for blob in blobs_monthly:        
         if(blob.name != my_prefix):
-            paths = blob.name.replace(my_prefix, "")            
-            list_paths_gcs.append(paths)                
+            paths_monthly = blob.name.replace(my_prefix, "")            
+            list_paths_monthly.append(paths_monthly)                
 
-    #Retrieving all filenames and making then into a list of months
-    df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-    df_paths["month"] = df_paths.path.str[0:7]
-    df_months = df_paths.drop(columns=['path'])
-    df_months = df_months.drop_duplicates(subset=['month'])                          
-    months = df_months.to_records(index=False)
-    months_list = list(months)
-    months_list  = [tupleObj[0] for tupleObj in months_list]    
-    months_list.sort(reverse=True)    
+    df_monthly = pd.DataFrame((list_paths_monthly), columns=['filename'])        
+    df_monthly["month"] = df_monthly.filename.str[0:7]
+    list_chosenmonth= [chosenmonth]    
+    df_monthly = df_monthly.query('month in @list_chosenmonth')            
+    list_monthly = df_monthly.to_records(index=False)
+    list_monthly  = [tupleObj[1] for tupleObj in list_monthly]
 
-    #Retrieving all filenames and making then into a list of available files
-    list_chosenmonth= [chosenmonth]
-    df_paths = df_paths.query('month in @list_chosenmonth')        
-    df_paths = df_paths.drop(columns=['month'])                    
-    list_paths2 = df_paths.to_records(index=False)
-    list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-    list_paths3 = list(list_paths2)    
+    if list_monthly != [] and action == None:
 
-    #########################################################
-    # Downloading selected files from Google storage
-    #########################################################
+        month_csv = bucket.get_blob('Monthly/{}.csv'.format(chosenmonth)).download_as_text()
 
-    gcs_data_collected = []
+        #Converting data into a Pandas dataframe
+        df_month = pd.DataFrame([x.split(',') for x in month_csv.split('\r\n')])        
+        df_month.columns = ['date', 'consumption', 'cost', 'consumption_house', 'consumption_ev', 'cost_house', 'cost_ev']
+        df_month = df_month[df_month['consumption'].notna()]
+        df_month['consumption'] = df_month['consumption'].astype(float)  
+        df_month['cost'] = df_month['cost'].astype(float)  
+        df_month['consumption_house'] = df_month['consumption_house'].astype(float)  
+        df_month['consumption_ev'] = df_month['consumption_ev'].astype(float)  
+        df_month['cost_house'] = df_month['cost_house'].astype(float)  
+        df_month['cost_ev'] = df_month['cost_ev'].astype(float)                                          
 
-    for blob_name in list_paths3:
-        gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_file_collected = gcs_file_collected.replace("\n", ",")           
-        gcs_data_collected.append(gcs_file_collected)            
+        #Making dataframe into list to be displayed on webpage
+        data = df_month.values.tolist()
 
-    #Converting data into a Pandas dataframe
-    df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-    df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-    df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
+        #Adjusting the dataframe and aggregating the data by date
+        df_aggr = df_month.drop(columns=['date'])
+        df_aggr = df_aggr.agg(['sum'])
+        rounded_df_aggr = df_aggr.round(decimals=2)
+        aggr = rounded_df_aggr.values.tolist()
 
-    gcs_data_consumption = []
+        #Retrieving all filenames and making then into a list of months
+        my_prefix = "Collecteddata/"
+        blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
 
-    for blob_name in list_paths3:
-        gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
-        gcs_file_consumption = gcs_file_consumption.replace("\n", ",")        
-        gcs_data_consumption.append(gcs_file_consumption)            
+        list_paths_gcs = []
 
-    #Converting data into a Pandas dataframe
-    df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
-    df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
-    df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
+        for blob in blobs:        
+            if(blob.name != my_prefix):
+                paths = blob.name.replace(my_prefix, "")            
+                list_paths_gcs.append(paths)                
 
-    gcs_data_cost = []
+        df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
+        df_paths["month"] = df_paths.path.str[0:7]
+        df_months = df_paths.drop(columns=['path'])
+        df_months = df_months.drop_duplicates(subset=['month'])                          
+        months = df_months.to_records(index=False)
+        months_list = list(months)
+        months_list  = [tupleObj[0] for tupleObj in months_list]    
+        months_list.sort(reverse=True)
 
-    for blob_name in list_paths3:
-        gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")       
-        gcs_file_cost = gcs_file_cost.replace("\n", ",")               
-        gcs_data_cost.append(gcs_file_cost)            
+    if list_monthly == [] or action == 'Renew monthly data':
 
-    #Converting data into a Pandas dataframe
-    df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
-    df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
-    df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
+        my_prefix = "Collecteddata/"
+        blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
 
-    df_data1 = df_data_collected
-    df_data2 = df_data_consumption
-    df_data3 = df_data_cost
+        list_paths_gcs = []
 
-    #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
-    df_data1['cost'] = df_data1['cost'].astype(float)
-    df_data2 = df_data2.drop(columns=['date'])
-    df_data3 = df_data3.drop(columns=['date'])
-    df_data1_2 = pd.merge(df_data1, df_data2, on="start")
-    df_data1_2_3 = pd.merge(df_data1_2, df_data3, on="start")
-    df_data1_2_3b = df_data1_2_3.drop(columns=['start', 'stop', 'price'])
-    df_data1_2_3b['consumption'] = df_data1_2_3b['consumption'].astype(float)
-    df_data1_2_3b['cost'] = df_data1_2_3b['cost'].astype(float)
-    df_data1_2_3b['consumption_house'] = df_data1_2_3b['consumption_house'].astype(float)
-    df_data1_2_3b['consumption_ev'] = df_data1_2_3b['consumption_ev'].astype(float)
-    df_data1_2_3b['cost_house'] = df_data1_2_3b['cost_house'].astype(float)
-    df_data1_2_3b['cost_ev'] = df_data1_2_3b['cost_ev'].astype(float)
-    df_aggr2 = df_data1_2_3b.groupby(['date'], as_index=False).sum()
+        for blob in blobs:        
+            if(blob.name != my_prefix):
+                paths = blob.name.replace(my_prefix, "")            
+                list_paths_gcs.append(paths)                
 
-    rounded_df_aggr2 = df_aggr2.round(decimals=3)
-    data = rounded_df_aggr2.values.tolist()
+        #Retrieving all filenames and making then into a list of months
+        df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
+        df_paths["month"] = df_paths.path.str[0:7]
+        df_months = df_paths.drop(columns=['path'])
+        df_months = df_months.drop_duplicates(subset=['month'])                          
+        months = df_months.to_records(index=False)
+        months_list = list(months)
+        months_list  = [tupleObj[0] for tupleObj in months_list]    
+        months_list.sort(reverse=True)   
 
-    #Adjusting the dataframe and aggregating the data by date
-    df_aggr = df_data1_2_3b.drop(columns=['date'])
-    df_aggr = df_aggr.agg(['sum'])
-    rounded_df_aggr = df_aggr.round(decimals=2)
-    aggr = rounded_df_aggr.values.tolist()
+        #Retrieving all filenames and making then into a list of available files
+        list_chosenmonth= [chosenmonth]
+        df_paths = df_paths.query('month in @list_chosenmonth')        
+        df_paths = df_paths.drop(columns=['month'])                    
+        list_paths2 = df_paths.to_records(index=False)
+        list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+        #list_paths3 = list(list_paths2)    
 
-    return render_template("/viewamonth.html", months_list=months_list, data=data, monthtoshow=monthtoshow, aggr=aggr)
+        #########################################################
+        # Downloading selected files from Google storage
+        #########################################################
+
+        gcs_data_collected = []
+
+        for blob_name in list_paths3:
+            gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
+            gcs_file_collected = gcs_file_collected.replace("\n", ",")           
+            gcs_data_collected.append(gcs_file_collected)            
+
+        #Converting data into a Pandas dataframe
+        df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
+        df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
+        df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
+
+        gcs_data_consumption = []
+
+        for blob_name in list_paths3:
+            gcs_file_consumption = bucket.get_blob('Consumption/'+blob_name).download_as_text().replace("\r\n", ",")            
+            gcs_file_consumption = gcs_file_consumption.replace("\n", ",")        
+            gcs_data_consumption.append(gcs_file_consumption)            
+
+        #Converting data into a Pandas dataframe
+        df_data_consumption = pd.DataFrame((gcs_data_consumption), columns=['String'])
+        df_data_consumption[['date', 'start', 'consumption_house', 'consumption_ev', 'Delete']]=df_data_consumption["String"].str.split(",", expand=True)
+        df_data_consumption = df_data_consumption.drop(columns=['String', 'Delete'])        
+
+        gcs_data_cost = []
+
+        for blob_name in list_paths3:
+            gcs_file_cost = bucket.get_blob('Cost/'+blob_name).download_as_text().replace("\r\n", ",")       
+            gcs_file_cost = gcs_file_cost.replace("\n", ",")               
+            gcs_data_cost.append(gcs_file_cost)            
+
+        #Converting data into a Pandas dataframe
+        df_data_cost = pd.DataFrame((gcs_data_cost), columns=['String'])
+        df_data_cost[['date', 'start', 'cost_house', 'cost_ev', 'Delete']]=df_data_cost["String"].str.split(",", expand=True)
+        df_data_cost = df_data_cost.drop(columns=['String', 'Delete'])        
+
+        df_data1 = df_data_collected
+        df_data2 = df_data_consumption
+        df_data3 = df_data_cost
+
+        #Transforming the lists into dataframes, droping unnecessary colums, transforming strings to floats, merger dataframes, rounding the figures to two decimals and transforming the dataframe to a list
+        df_data1['cost'] = df_data1['cost'].astype(float)
+        df_data2 = df_data2.drop(columns=['date'])
+        df_data3 = df_data3.drop(columns=['date'])
+        df_data1_2 = pd.merge(df_data1, df_data2, on="start")
+        df_data1_2_3 = pd.merge(df_data1_2, df_data3, on="start")
+        df_data1_2_3b = df_data1_2_3.drop(columns=['start', 'stop', 'price'])
+        df_data1_2_3b['consumption'] = df_data1_2_3b['consumption'].astype(float)
+        df_data1_2_3b['cost'] = df_data1_2_3b['cost'].astype(float)
+        df_data1_2_3b['consumption_house'] = df_data1_2_3b['consumption_house'].astype(float)
+        df_data1_2_3b['consumption_ev'] = df_data1_2_3b['consumption_ev'].astype(float)
+        df_data1_2_3b['cost_house'] = df_data1_2_3b['cost_house'].astype(float)
+        df_data1_2_3b['cost_ev'] = df_data1_2_3b['cost_ev'].astype(float)
+        df_aggr2 = df_data1_2_3b.groupby(['date'], as_index=False).sum()
+
+        rounded_df_aggr2 = df_aggr2.round(decimals=3)
+        data = rounded_df_aggr2.values.tolist()
+
+        #Saving data for month in Google storage
+        bucket.blob('Monthly/{}.csv'.format(chosenmonth)).upload_from_string(rounded_df_aggr2.to_csv(header=False, index=False), 'text/csv')    
+
+        #Adjusting the dataframe and aggregating the data by date
+        df_aggr = rounded_df_aggr2.drop(columns=['date'])
+        df_aggr = df_aggr.agg(['sum'])
+        rounded_df_aggr = df_aggr.round(decimals=2)
+        aggr = rounded_df_aggr.values.tolist()
+
+    return render_template("/viewamonth.html", months_list=months_list, data=data, monthtoshow=monthtoshow, aggr=aggr, chosenmonth=chosenmonth)
 
 @app.route("/totalcostmonth", methods=["GET", "POST"])
 def totalcostmonth():
@@ -1726,13 +1806,12 @@ def totalcostmonth():
             monthtoshow=costmonth
             costmonth = costmonth
         
-        if action[0:9] == "View this":
+        if action[0:9] == "View year":
             date_time = datetime.datetime.now()
             costmonth = date_time.strftime("%Y")
             monthssofar = int(date_time.strftime("%m"))
             monthtoshow=costmonth
             costmonth = costmonth
-        
 
     fixedmontlycost=session.get("fixedmontlycost")
     fixedkwhcost=session.get("fixedkwhcost")    
@@ -1759,22 +1838,25 @@ def totalcostmonth():
             list_paths_gcs.append(paths)                
 
     #Retrieving all filenames and making then into a list of months
-    df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-    df_paths["month"] = df_paths.path.str[0:7]
+    df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])
+    if costmonth[4:5] == '-':        
+        df_paths["month"] = df_paths.path.str[0:7]
+    else:
+        df_paths["month"] = df_paths.path.str[0:4]  
     df_months = df_paths.drop(columns=['path'])
     df_months = df_months.drop_duplicates(subset=['month'])                          
     months = df_months.to_records(index=False)
     months_list = list(months)
     months_list  = [tupleObj[0] for tupleObj in months_list]    
-    months_list.sort(reverse=True)    
+    months_list.sort(reverse=True)
 
     #Retrieving all filenames and making then into a list of available files
     list_chosenmonth= [costmonth]
     df_paths = df_paths.query('month in @list_chosenmonth')        
     df_paths = df_paths.drop(columns=['month'])                    
     list_paths2 = df_paths.to_records(index=False)
-    list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-    list_paths3 = list(list_paths2)    
+    list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+    #list_paths3 = list(list_paths2)    
 
     #########################################################
     # Downloading selected files from Google storage
@@ -1785,8 +1867,8 @@ def totalcostmonth():
     for blob_name in list_paths3:
         gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",") 
         gcs_file_collected = gcs_file_collected.replace("\n", ",")                      
-        gcs_data_collected.append(gcs_file_collected)            
-
+        gcs_data_collected.append(gcs_file_collected)
+ 
     #Converting data into a Pandas dataframe
     df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
     df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
@@ -2018,8 +2100,8 @@ def viewprices():
         df_paths = df_paths[df_paths.date > fromdate]
         df_paths = df_paths.drop(columns=['date'])                    
         list_paths2 = df_paths.to_records(index=False)
-        list_paths2  = [tupleObj[0] for tupleObj in list_paths2]            
-        list_paths3 = list(list_paths2)    
+        list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
+        #list_paths3 = list(list_paths2)    
 
         #########################################################
         # Downloading selected files from Google storage

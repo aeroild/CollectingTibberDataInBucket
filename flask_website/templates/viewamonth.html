@@ -36,7 +36,13 @@
         {% endfor %}
         <tr><td><b>Sum</b></td><td><b>{{aggr[0][0]}}</b></td><td><b>{{aggr[0][2]}}</b></td><td><b>{{aggr[0][3]}}</b></td><td><b>{{aggr[0][4]}}</b></td><td><b>{{aggr[0][5]}}</b></td><td><b>{{aggr[0][1]}}</b></td></tr>
     </table>
+    <br>
 
+
+    <form action="/viewamonth" method="POST">
+        <input type="hidden" name="chosenmonth2" value="{{chosenmonth}}" />       
+        <input type="submit" class="btn btn-primary" name="action" value="Renew monthly data">
+    </form>
 </div>
 
 
