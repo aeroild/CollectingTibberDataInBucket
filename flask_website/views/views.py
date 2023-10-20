@@ -1643,8 +1643,14 @@ def viewamonth():
 
         month_csv = bucket.get_blob('Monthly/{}.csv'.format(chosenmonth)).download_as_text()
 
+        print(month_csv)
+
         #Converting data into a Pandas dataframe
-        df_month = pd.DataFrame([x.split(',') for x in month_csv.split('\r\n')])        
+
+        if '\r\n' in month_csv:
+            df_month = pd.DataFrame([x.split(',') for x in month_csv.split('\r\n')])
+        else:
+            df_month = pd.DataFrame([x.split(',') for x in month_csv.split('\n')])           
         df_month.columns = ['date', 'consumption', 'cost', 'consumption_house', 'consumption_ev', 'cost_house', 'cost_ev']
         df_month = df_month[df_month['consumption'].notna()]
         df_month['consumption'] = df_month['consumption'].astype(float)  
@@ -2023,7 +2029,10 @@ def viewprices():
         # Retrieving deciles file from Google Storage
         deciles = bucket.get_blob('deciles.csv').download_as_text()
 
-        df_deciles = pd.DataFrame([x.split(',') for x in deciles.split('\r\n')])
+        if '\r\n' in deciles:
+            df_deciles = pd.DataFrame([x.split(',') for x in deciles.split('\r\n')])
+        else:
+            df_deciles = pd.DataFrame([x.split(',') for x in deciles.split('\n')])
         df_deciles.columns = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
         df_deciles = df_deciles.drop(df_deciles.index[[10]])
         df_deciles['max'] = df_deciles['max'].astype(float)  
