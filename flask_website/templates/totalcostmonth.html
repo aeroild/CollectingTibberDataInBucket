@@ -6,31 +6,38 @@
 
 <div class="container">
 
-            <h4>Please select month to view total cost</h4>
+            <h4>Please select month or year to view total cost</h4>
         <div class="form-group">   
             <div class="row">
                 <div class="col-auto">
-                <form action="/totalcostmonth" method="POST">
-                    <select class="form-select" id="costmonth" name="costmonth" required>
-                    <option selected>Select month</option>
-                    {% for months in months_list %}
-                    <option value="{{ months }}">{{ months }}</option>
-                    {% endfor %}
-                    </select>
+                    <form action="/totalcostmonth" method="POST">
+                        <select class="form-select" id="costmonth" name="costmonth">
+                        <option selected>Select month</option>
+                        {% for months in months_list %}
+                        <option value="{{ months }}">{{ months }}</option>
+                        {% endfor %}
+                        </select>
                 </div>
                 <div class="col-auto">  
-                <button type="submit" name="action" value="View selected month" class="btn btn-primary">View selected month</button>
+                    <button type="submit" name="action" value="View selected month" class="btn btn-primary">View selected month</button>
                 </div>
-                </form>                                    
+                    </form>                                    
                 <div class="col-auto">
-                <i><b>or</b></i>
+                    <i><b>or</b></i>
                 </div>
                 <div class="col-auto"> 
                     <form action="/totalcostmonth" method="POST">
-                        <input type="submit" class="btn btn-primary" name="action" value="View year to date">
-                
-                    </form>                    
+                        <select class="form-select" id="costyear" name="costyear">
+                        <option selected>Select year</option>
+                        {% for year in years_list %}
+                        <option value="{{ year }}">{{ year }}</option>
+                        {% endfor %}
+                        </select>   
                 </div>
+                <div class="col-auto">
+                    <button type="submit" name="action" value="View year" class="btn btn-primary">View year</button>                                                                       
+                </div>                
+                    </form>                    
             </div>
         </div>
 

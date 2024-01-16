@@ -1804,18 +1804,32 @@ def totalcostmonth():
             
         req = request.form   #Lagrer i variablen req data som request lager en fin diconary av
         costmonth = req.get("costmonth")
+        costyear = req.get("costyear")        
         action = req.get("action")
 
         if action[0:9] == "View sele":
             monthtoshow=costmonth
             costmonth = costmonth
         
+        #if action[0:9] == "View year":
+        #    date_time = datetime.datetime.now()
+        #    costmonth = date_time.strftime("%Y")
+        #    monthssofar = int(date_time.strftime("%m"))
+        #    monthtoshow=costmonth
+        #    costmonth = costmonth
+        
         if action[0:9] == "View year":
             date_time = datetime.datetime.now()
-            costmonth = date_time.strftime("%Y")
-            monthssofar = int(date_time.strftime("%m"))
+            currentyear = date_time.strftime("%Y")
+            if costyear == 'Select year':
+                costyear = currentyear
+            costmonth = costyear
+
+            if costyear == currentyear:
+                monthssofar = int(date_time.strftime("%m"))
+            else:
+                monthssofar = 12
             monthtoshow=costmonth
-            costmonth = costmonth
 
 
     storage_client = storage.Client()
@@ -1841,6 +1855,16 @@ def totalcostmonth():
     months_list  = [tupleObj[0] for tupleObj in months_list]    
     months_list.sort(reverse=True)
 
+    df_paths2 = pd.DataFrame((list_paths_gcs), columns=['path'])        
+    df_paths2["year"] = df_paths2.path.str[0:4]
+    df_years = df_paths2.drop(columns=['path'])
+    df_years = df_years.drop_duplicates(subset=['year'])                          
+    years = df_years.to_records(index=False)
+    years_list = list(years)
+    years_list  = [tupleObj[0] for tupleObj in years_list]    
+    years_list.sort(reverse=True)
+
+
     fixedmontlycost=session.get("fixedmontlycost")
     fixedkwhcost=session.get("fixedkwhcost")    
 
@@ -1865,7 +1889,9 @@ def totalcostmonth():
                 paths_monthly = blob.name.replace(my_prefix, "")            
                 list_paths_monthly.append(paths_monthly)                
 
-        df_monthly = pd.DataFrame((list_paths_monthly), columns=['filename'])        
+        filtered_list_paths_monthly = [ i for i in list_paths_monthly if i[0:4] == costyear]
+
+        df_monthly = pd.DataFrame((filtered_list_paths_monthly), columns=['filename'])        
         list_monthly = df_monthly.to_records(index=False)
         list_monthly  = [tupleObj[0] for tupleObj in list_monthly]
 
@@ -1947,7 +1973,7 @@ def totalcostmonth():
     house_cost_tibber_per_kwh = round(aggr[0][4] / aggr[0][2], 2)
     cost_house_per_kwh_total = round(cost_house_total / aggr[0][2], 2)
 
-    return render_template("/totalcostmonth.html", months_list=months_list, aggr=aggr, cost_house_ellevio=cost_house_ellevio, cost_ev_ellevio=cost_ev_ellevio, total_cost_ellevio=total_cost_ellevio, monthtoshow=monthtoshow, total_cost = total_cost, total_cost_tibber_per_kwh = total_cost_tibber_per_kwh, total_cost_per_kwh = total_cost_per_kwh, cost_ev_total = cost_ev_total, ev_cost_tibber_per_kwh = ev_cost_tibber_per_kwh, cost_ev_per_kwh_total = cost_ev_per_kwh_total, cost_house_total = cost_house_total, house_cost_tibber_per_kwh = house_cost_tibber_per_kwh, cost_house_per_kwh_total = cost_house_per_kwh_total)
+    return render_template("/totalcostmonth.html", months_list=months_list, years_list=years_list, aggr=aggr, cost_house_ellevio=cost_house_ellevio, cost_ev_ellevio=cost_ev_ellevio, total_cost_ellevio=total_cost_ellevio, monthtoshow=monthtoshow, total_cost = total_cost, total_cost_tibber_per_kwh = total_cost_tibber_per_kwh, total_cost_per_kwh = total_cost_per_kwh, cost_ev_total = cost_ev_total, ev_cost_tibber_per_kwh = ev_cost_tibber_per_kwh, cost_ev_per_kwh_total = cost_ev_per_kwh_total, cost_house_total = cost_house_total, house_cost_tibber_per_kwh = house_cost_tibber_per_kwh, cost_house_per_kwh_total = cost_house_per_kwh_total)
 
 
 @app.route("/viewconsumption", methods=["GET", "POST"])
@@ -2078,7 +2104,7 @@ def viewprices():
         req = request.form
         numberofdays = float(req["numberofdays"])
 
-        #Calculating the date 180 days prior to today
+        #Calculating the date x days prior to today
         fromdate = date.today() - relativedelta(days=+numberofdays)
         fromdate = fromdate.strftime("%Y-%m-%d") 
 
@@ -2280,8 +2306,17 @@ def setup():
 
         req = request.form 
 
-        fixedmontlycost = req["fixedmontlycost"]
-        fixedkwhcost    = req["fixedkwhcost"]
+        fixedmontlycost = req.get("fixedmontlycost")
+        fixedkwhcost    = req.get("fixedkwhcost")
+        action    = req.get("action")
+
+        if fixedmontlycost == '' and fixedkwhcost == '' and action[0:7] == 'Use 450':
+            fixedmontlycost = 450
+            fixedkwhcost = 0.715
+
+        if fixedmontlycost == '' and fixedkwhcost == '' and action[0:7] == 'Use 405':
+            fixedmontlycost = 405
+            fixedkwhcost = 0.67            
 
         session["fixedmontlycost"] = fixedmontlycost
         session["fixedkwhcost"] =   fixedkwhcost      
