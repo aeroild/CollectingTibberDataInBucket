@@ -11,6 +11,8 @@ import datetime
 
 from datetime import timezone
 
+from datetime import timedelta
+
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
@@ -25,6 +27,8 @@ import numpy as np
 from flask_website.config import tibber_token, my_bucket
 
 from google.cloud import storage
+
+import google.cloud.storage
 
 
 @app.route("/")
@@ -2047,6 +2051,7 @@ def viewprices():
     if request.method == "GET":
 
         # Retrieving deciles file from Google Storage
+        """
         deciles = bucket.get_blob('deciles.csv').download_as_text()
 
         if '\r\n' in deciles:
@@ -2056,6 +2061,11 @@ def viewprices():
         df_deciles.columns = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
         df_deciles = df_deciles.drop(df_deciles.index[[10]])
         df_deciles['max'] = df_deciles['max'].astype(float)  
+        """
+
+        blob_read = google.cloud.storage.blob.Blob(name='deciles.parquet', bucket=bucket)
+        url = blob_read.generate_signed_url(timedelta(seconds=5))
+        df_deciles = pd.read_parquet(url)  
 
         #Creating new objects for min and max values
         max_0 = df_deciles.at[0, 'max']
