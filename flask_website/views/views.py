@@ -28,7 +28,9 @@ from flask_website.config import tibber_token, my_bucket
 
 from google.cloud import storage
 
-import google.cloud.storage
+#import google.cloud.storage
+
+import tempfile
 
 
 @app.route("/")
@@ -2045,170 +2047,73 @@ def viewconsumption():
 @app.route("/viewprices", methods=["GET", "POST"])
 def viewprices():
 
-    storage_client = storage.Client()
-    bucket = storage_client.get_bucket(my_bucket)        
-
-    if request.method == "GET":
-
-        # Retrieving deciles file from Google Storage
-        """
-        deciles = bucket.get_blob('deciles.csv').download_as_text()
-
-        if '\r\n' in deciles:
-            df_deciles = pd.DataFrame([x.split(',') for x in deciles.split('\r\n')])
-        else:
-            df_deciles = pd.DataFrame([x.split(',') for x in deciles.split('\n')])
-        df_deciles.columns = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
-        df_deciles = df_deciles.drop(df_deciles.index[[10]])
-        df_deciles['max'] = df_deciles['max'].astype(float)  
-        """
-
-        blob_read = google.cloud.storage.blob.Blob(name='deciles.parquet', bucket=bucket)
-        url = blob_read.generate_signed_url(timedelta(seconds=5))
-        df_deciles = pd.read_parquet(url)  
-
-        #Creating new objects for min and max values
-        max_0 = df_deciles.at[0, 'max']
-        max_1 = df_deciles.at[1, 'max']        
-        max_2 = df_deciles.at[2, 'max']        
-        max_3 = df_deciles.at[3, 'max']
-        max_6 = df_deciles.at[6, 'max']
-        max_7 = df_deciles.at[7, 'max']        
-        max_8 = df_deciles.at[8, 'max']
-
-        #Function for rating the energy price
-        def rating(value):
-            if value <= max_0:
-                return "Very cheap"
-            elif max_0 < value <= max_1:
-                return "Very cheap"
-            elif max_1 < value <= max_2:
-                return "Cheap"                
-            elif max_2 < value <= max_6:
-                return "Normal"
-            elif max_6 < value <= max_7:
-                return "Expensive"
-            elif max_7 < value <= max_8:
-                return "Very expensive"
-            elif value > max_8:
-                return "Very expensive"
-
-        decile = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
-        rate = ['Very cheap', 'Very cheap', 'Cheap', 'Cheap', 'Normal', 'Normal', 'Expensive', 'Expensive', 'Very expensive', 'Very expensive']        
-        df_deciles['decile'] = decile
-        df_deciles['rating'] = rate
-
-        #Converting the dataframe into a list of tuples
-        deciles = df_deciles.values.tolist()
-
-        #Calculating the number of days the rating is based on
-        df_days = df_deciles[['count']]
-        df_days['count'] = df_days['count'].astype(float)
-        df_days = df_days.agg(['sum'])
-        days = df_days.values.tolist()        
-        numberofdays = round(days[0][0]/24, 0)
-       
-
     if request.method == "POST":
 
-        req = request.form
-        numberofdays = float(req["numberofdays"])
+        req = request.form 
+        numberofdays=req["numberofdays"]        
+        hourstocollect = int(req["numberofdays"])*24
 
-        #Calculating the date x days prior to today
-        fromdate = date.today() - relativedelta(days=+numberofdays)
-        fromdate = fromdate.strftime("%Y-%m-%d") 
+    if request.method == "GET":
+        hourstocollect = 720
+        numberofdays= 30
 
-        ############################################################
-        # Retrieving files from Google storage for chosen date
-        ############################################################
+    storage_client = storage.Client()
+    bucket = storage_client.get_bucket(my_bucket)
 
-        my_prefix = "Collecteddata/"
-        blobs = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
+    account=tibber.Account(tibber_token)
+    home = account.homes[0]
+    hour_data = home.fetch_consumption("HOURLY", last=hourstocollect)
+    
+    prices=[]
 
-        list_paths_gcs = []
+    for hour in hour_data:
+        data=(hour.unit_price)
+        prices.append(data)
 
-        for blob in blobs:        
-            if(blob.name != my_prefix):
-                paths = blob.name.replace(my_prefix, "")            
-                list_paths_gcs.append(paths)                
+    df_allprices = pd.DataFrame((prices), columns=['price'])
+    df_allprices = df_allprices[df_allprices['price'].notna()]
+    df_allprices['price'] = df_allprices['price'].astype(float)    
 
-        #Retrieving all filenames and making then into a list of months
-        df_paths = pd.DataFrame((list_paths_gcs), columns=['path'])        
-        df_paths["date"] = df_paths.path.str[0:10]
-        list_fromdate= [fromdate]
-        df_paths = df_paths[df_paths.date > fromdate]
-        df_paths = df_paths.drop(columns=['date'])                    
-        list_paths2 = df_paths.to_records(index=False)
-        list_paths3  = [tupleObj[0] for tupleObj in list_paths2]            
-        #list_paths3 = list(list_paths2)    
+    #Sorting data by ascending price and deviding into ten groups of equal size
+    df_allprices = df_allprices.sort_values('price', ascending=True)
+    df_allprices['Tengroups'] = pd.qcut(df_allprices['price'], 10, labels = False)        
 
-        #########################################################
-        # Downloading selected files from Google storage
-        #########################################################
+    #Calculating the min and max value and more for each group
+    df_deciles = df_allprices.set_index("Tengroups").select_dtypes(np.number).stack().groupby(level=0).describe()         
 
-        gcs_data_collected = []
+    #Creating new objects for min and max values
+    max_0 = df_deciles.at[0, 'max']
+    max_1 = df_deciles.at[1, 'max']        
+    max_2 = df_deciles.at[2, 'max']        
+    max_3 = df_deciles.at[3, 'max']
+    max_6 = df_deciles.at[6, 'max']
+    max_7 = df_deciles.at[7, 'max']        
+    max_8 = df_deciles.at[8, 'max']
 
-        for blob_name in list_paths3:
-            gcs_file_collected = bucket.get_blob('Collecteddata/'+blob_name).download_as_text().replace("\r\n", ",")            
-            gcs_file_collected = gcs_file_collected.replace("\n", ",")               
-            gcs_data_collected.append(gcs_file_collected)            
+    #Function for rating the energy price
+    def rating(value):
+        if value <= max_0:
+            return "Very cheap"
+        elif max_0 < value <= max_1:
+            return "Very cheap"
+        elif max_1 < value <= max_2:
+            return "Cheap"                
+        elif max_2 < value <= max_6:
+            return "Normal"
+        elif max_6 < value <= max_7:
+            return "Expensive"
+        elif max_7 < value <= max_8:
+            return "Very expensive"
+        elif value > max_8:
+            return "Very expensive"
 
-        #Converting data into a Pandas dataframe
-        df_data_collected = pd.DataFrame((gcs_data_collected), columns=['String'])
-        df_data_collected[['date', 'start', 'stop', 'price', 'consumption', 'cost', 'Delete']]=df_data_collected["String"].str.split(",", expand=True)
-        df_data_collected = df_data_collected.drop(columns=['String', 'Delete'])        
+    decile = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
+    rate = ['Very cheap', 'Very cheap', 'Cheap', 'Cheap', 'Normal', 'Normal', 'Expensive', 'Expensive', 'Very expensive', 'Very expensive']        
+    df_deciles['decile'] = decile
+    df_deciles['rating'] = rate
 
-        df_data1 = df_data_collected
-
-        #Converting the list of tuples into a dataframe
-        df_allprices = df_data1.drop(columns=['start', 'stop', 'consumption', 'cost'])    
-        df_allprices['price'] = df_allprices['price'].astype(float)    
-        mean_price = df_allprices['price'].mean()
-
-        #Sorting data by ascending price and deviding into ten groups of equal size
-        df_allprices = df_allprices.sort_values('price', ascending=True)
-        df_allprices['Tengroups'] = pd.qcut(df_allprices['price'], 10, labels = False)        
-
-        #Calculating the min and max value and more for each group
-        df_deciles = df_allprices.set_index("Tengroups").select_dtypes(np.number).stack().groupby(level=0).describe()         
-
-        #Saving rating in Google storage
-        bucket.blob('deciles.csv').upload_from_string(df_deciles.to_csv(header=False, index=False), 'text/csv')
-
-        #Creating new objects for min and max values
-        max_0 = df_deciles.at[0, 'max']
-        max_1 = df_deciles.at[1, 'max']        
-        max_2 = df_deciles.at[2, 'max']        
-        max_3 = df_deciles.at[3, 'max']
-        max_6 = df_deciles.at[6, 'max']
-        max_7 = df_deciles.at[7, 'max']        
-        max_8 = df_deciles.at[8, 'max']
-
-        #Function for rating the energy price
-        def rating(value):
-            if value <= max_0:
-                return "Very cheap"
-            elif max_0 < value <= max_1:
-                return "Very cheap"
-            elif max_1 < value <= max_2:
-                return "Cheap"                
-            elif max_2 < value <= max_6:
-                return "Normal"
-            elif max_6 < value <= max_7:
-                return "Expensive"
-            elif max_7 < value <= max_8:
-                return "Very expensive"
-            elif value > max_8:
-                return "Very expensive"
-
-        decile = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth']
-        rate = ['Very cheap', 'Very cheap', 'Cheap', 'Cheap', 'Normal', 'Normal', 'Expensive', 'Expensive', 'Very expensive', 'Very expensive']        
-        df_deciles['decile'] = decile
-        df_deciles['rating'] = rate
-
-        #Converting the dataframe into a list of tuples
-        deciles = df_deciles.values.tolist()
-
+    #Converting the dataframe into a list of tuples
+    deciles = df_deciles.values.tolist()
 
     ################################################################
     # Collecting energy prices for today and tomorrow from Tibber
