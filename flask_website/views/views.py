@@ -139,10 +139,10 @@ def datacollected():
             data4=(hour.consumption)
             data5=(hour.cost)
 
-            if data4 == None:
-                data4 = 0
-            if data5 == None:
-                data5 = 0                       
+            #if data4 == None:
+            #    data4 = 0
+            #if data5 == None:
+            #    data5 = 0                       
 
             start.append(data1)
             stop.append(data2)
@@ -169,6 +169,10 @@ def datacollected():
         df_collected = pd.DataFrame((collected_data), columns=['date', 'start', 'stop', 'price', 'cons', 'cost'])
         df_collected_data = pd.DataFrame((collected_data), columns=['date', 'start', 'stop', 'price', 'cons', 'cost'])        
 
+        #Fjerner eventuelle rader med null i forbruk og pris
+        df_collected_data=df_collected_data.dropna().reset_index(drop=True)
+        df_collected=df_collected.dropna().reset_index(drop=True)
+        
         #Creates a new column with the filename to be used
         df_collected_data["filename"] = df_collected_data.start.str[0:13]
 
@@ -180,7 +184,7 @@ def datacollected():
         bucket = storage_client.get_bucket(my_bucket)
 
         df_collected_data = df_collected_data.reset_index()  # make sure indexes pair with number of rows
-
+        
         for index, row in df_collected_data.iterrows():
             bucket.blob('Collecteddata/{}.csv'.format(row.iloc[7])).upload_from_string(row.iloc[1:7].to_csv(header=False, index=False), 'text/csv')
 
@@ -1798,6 +1802,9 @@ def viewamonth():
 @app.route("/totalcostmonth", methods=["GET", "POST"])
 def totalcostmonth():
 
+    costmonth = None
+    costyear = None
+
     if request.method == "GET":
 
         date_time = datetime.datetime.now()
@@ -1805,17 +1812,61 @@ def totalcostmonth():
         monthtoshow=costmonth
         costmonth = costmonth
         action = ""
+        """
+        if costmonth[0:4] == "2023":
+            fixedmontlycost = 405
+            fixedkwhcost = 0.67
+        elif costmonth[0:4] == "2024":
+            fixedmontlycost = 450
+            fixedkwhcost = 0.715
+
+        elif costmonth[0:4] == "2025":                  
+            fixedmontlycost = 0
+            fixedkwhcost = 0
+        """
+        fixedmontlycost = 365
+        fixedkwhcost = 0.49125                        
+        peakkwhcost = 81.25
+        
+    fixedmontlycost=session.get("fixedmontlycost")
+    fixedkwhcost=session.get("fixedkwhcost")    
+    peakkwhcost=session.get("peakkwhcost")        
+
 
     if request.method == "POST":
-            
-        req = request.form   #Lagrer i variablen req data som request lager en fin diconary av
-        costmonth = req.get("costmonth")
-        costyear = req.get("costyear")        
+
+        req = request.form   #Lagrer i variablen req data som request lager en fin diconary av                
         action = req.get("action")
 
-        if action[0:9] == "View sele":
+        if action[0:4] == '2023':
+            fixedmontlycost = 405
+            fixedkwhcost = 0.67        
+            peakkwhcost = 0
+            costmonth=session.get("costmonth")
+            costyear=session.get("costyear")  
+
+        if action[0:4] == '2024':
+            fixedmontlycost = 450
+            fixedkwhcost = 0.715
+            peakkwhcost = 0
+            costmonth=session.get("costmonth")
+            costyear=session.get("costyear")      
+                        
+        if action[0:4] == '2025':
+            fixedmontlycost = 365
+            fixedkwhcost = 0.49125                        
+            peakkwhcost = 81.25
+            costmonth=session.get("costmonth")
+            costyear=session.get("costyear")      
+
+        if action[0:9] == "View sele" or action[0:9] == "View year":
+            costmonth = req.get("costmonth")
+            costyear = req.get("costyear")        
             monthtoshow=costmonth
-            costmonth = costmonth
+
+        #if action[0:9] == "View sele":
+        #    monthtoshow=costmonth
+        #    costmonth = costmonth
         
         #if action[0:9] == "View year":
         #    date_time = datetime.datetime.now()
@@ -1824,7 +1875,7 @@ def totalcostmonth():
         #    monthtoshow=costmonth
         #    costmonth = costmonth
         
-        if action[0:9] == "View year":
+        if action[0:9] == "View year" or costmonth[4:5] != '-':
             date_time = datetime.datetime.now()
             currentyear = date_time.strftime("%Y")
             if costyear == 'Select year':
@@ -1837,6 +1888,22 @@ def totalcostmonth():
                 monthssofar = 12
             monthtoshow=costmonth
 
+        if action[0:3] == '202' and costmonth[4:5] == '-':
+            monthtoshow=costmonth
+
+        """
+        if costmonth[0:4] == "2023":
+            fixedmontlycost = 405
+            fixedkwhcost = 0.67
+        elif costmonth[0:4] == "2024":
+            fixedmontlycost = 450
+            fixedkwhcost = 0.715
+
+        elif costmonth[0:4] == "2025":                  
+            fixedmontlycost = 0
+            fixedkwhcost = 0            
+ 
+        """
 
     storage_client = storage.Client()
     bucket = storage_client.get_bucket(my_bucket)    
@@ -1865,14 +1932,14 @@ def totalcostmonth():
     df_paths2["year"] = df_paths2.path.str[0:4]
     df_years = df_paths2.drop(columns=['path'])
     df_years = df_years.drop_duplicates(subset=['year'])                          
+    df_years = df_years[df_years.year != '2025']    #NB!!!!!!!!!!!!!!! Linjen legges inn slik at år 2025 foreløpig ikke kan velges
     years = df_years.to_records(index=False)
     years_list = list(years)
     years_list  = [tupleObj[0] for tupleObj in years_list]    
     years_list.sort(reverse=True)
 
-
-    fixedmontlycost=session.get("fixedmontlycost")
-    fixedkwhcost=session.get("fixedkwhcost")    
+    #fixedmontlycost=session.get("fixedmontlycost")
+    #fixedkwhcost=session.get("fixedkwhcost")    
 
     #Flashing message if necessary data is not input
     if fixedmontlycost == None and fixedkwhcost == None:
@@ -1883,7 +1950,7 @@ def totalcostmonth():
     # Retrieving files from Google storage for year or month
     ############################################################
 
-    if action[0:9] == "View year":
+    if action[0:9] == "View year" or costmonth[4:5] != '-':
 
         my_prefix = "Monthly/"
         blobs_monthly = bucket.list_blobs(prefix = my_prefix, delimiter = '/')
@@ -1924,7 +1991,34 @@ def totalcostmonth():
         df_year.drop(df_year.index[0], inplace=True)
         df_cost = df_year
 
-    if request.method == "GET" or action[0:9] == "View sele":
+    effekt_total = None
+    effekt_house = None
+
+    #if costmonth[0:4] == '2025':
+    if costmonth[0:4] == '2025' or costmonth[0:7] == '2024-12':
+
+        effekt_total_csv = bucket.get_blob('Effektavgift/{}_total.csv'.format(costmonth)).download_as_text()
+        effekt_house_csv = bucket.get_blob('Effektavgift/{}_house.csv'.format(costmonth)).download_as_text()
+
+        df_effekt_total = pd.DataFrame([x.split(',') for x in effekt_total_csv.split('\n')])
+        df_effekt_total.columns = ['effekt']
+        df_effekt_total = df_effekt_total.head(3)
+        df_effekt_total['effekt'] = df_effekt_total['effekt'].astype(float)                                                          
+        effekt_total = round(df_effekt_total.loc[:, 'effekt'].mean(), 3)
+
+        df_effekt_house = pd.DataFrame([x.split(',') for x in effekt_house_csv.split('\n')])
+        df_effekt_house.columns = ['effekt']
+        df_effekt_house = df_effekt_house.head(3)
+        df_effekt_house['effekt'] = df_effekt_house['effekt'].astype(float)                                                                  
+        effekt_house = round(df_effekt_house.loc[:, 'effekt'].mean(), 3)
+
+
+    if effekt_total == None:
+        effekt_total = 0
+    if effekt_house == None:
+        effekt_house = 0        
+
+    if request.method == "GET" or action[0:9] == "View sele" or costmonth[4:5] == '-':
 
         month_csv = bucket.get_blob('Monthly/{}.csv'.format(costmonth)).download_as_text()
 
@@ -1943,6 +2037,7 @@ def totalcostmonth():
         df_month['cost_ev'] = df_month['cost_ev'].astype(float)                                                  
         df_cost = df_month
 
+
     #Making dataframe into list to be displayed on webpage
     data = df_cost.values.tolist()
 
@@ -1954,12 +2049,16 @@ def totalcostmonth():
     rounded_df_aggr = df_aggr.round(decimals=2)
     aggr = rounded_df_aggr.values.tolist()
 
+    cost_effekt_total = (effekt_total/2) * float(peakkwhcost)
+    cost_effekt_house = effekt_house * float(peakkwhcost)
+    cost_effekt_ev = cost_effekt_total - cost_effekt_house
+
     #Calculating various cost elements
     if request.method == "POST" and action[0:9] == "View year":
         cost_house_ellevio = round((float(aggr[0][2]) * float(fixedkwhcost)) + float(fixedmontlycost)*monthssofar, 2)
     else:
-        cost_house_ellevio = round((float(aggr[0][2]) * float(fixedkwhcost)) + float(fixedmontlycost), 2)        
-    cost_ev_ellevio = round((float(aggr[0][3]) * float(fixedkwhcost)), 2)
+        cost_house_ellevio = round((float(aggr[0][2]) * float(fixedkwhcost)) + float(fixedmontlycost) + cost_effekt_house, 2)
+    cost_ev_ellevio = round((float(aggr[0][3]) * float(fixedkwhcost)) + cost_effekt_ev, 2)
     total_cost_ellevio = round(cost_house_ellevio + cost_ev_ellevio, 2)
     
     total_cost = round(aggr[0][1] + total_cost_ellevio, 2)
@@ -1979,7 +2078,13 @@ def totalcostmonth():
     house_cost_tibber_per_kwh = round(aggr[0][4] / aggr[0][2], 2)
     cost_house_per_kwh_total = round(cost_house_total / aggr[0][2], 2)
 
-    return render_template("/totalcostmonth.html", months_list=months_list, years_list=years_list, aggr=aggr, cost_house_ellevio=cost_house_ellevio, cost_ev_ellevio=cost_ev_ellevio, total_cost_ellevio=total_cost_ellevio, monthtoshow=monthtoshow, total_cost = total_cost, total_cost_tibber_per_kwh = total_cost_tibber_per_kwh, total_cost_per_kwh = total_cost_per_kwh, cost_ev_total = cost_ev_total, ev_cost_tibber_per_kwh = ev_cost_tibber_per_kwh, cost_ev_per_kwh_total = cost_ev_per_kwh_total, cost_house_total = cost_house_total, house_cost_tibber_per_kwh = house_cost_tibber_per_kwh, cost_house_per_kwh_total = cost_house_per_kwh_total)
+    if costmonth is not None:
+        session["costmonth"] = costmonth
+    if costyear is not None:
+        session["costyear"] = costyear
+
+
+    return render_template("/totalcostmonth.html", months_list=months_list, years_list=years_list, effekt_total=effekt_total, effekt_house=effekt_house, peakkwhcost=peakkwhcost, fixedkwhcost=fixedkwhcost, fixedmontlycost=fixedmontlycost, aggr=aggr, cost_house_ellevio=cost_house_ellevio, cost_ev_ellevio=cost_ev_ellevio, total_cost_ellevio=total_cost_ellevio, monthtoshow=monthtoshow, total_cost = total_cost, total_cost_tibber_per_kwh = total_cost_tibber_per_kwh, total_cost_per_kwh = total_cost_per_kwh, cost_ev_total = cost_ev_total, ev_cost_tibber_per_kwh = ev_cost_tibber_per_kwh, cost_ev_per_kwh_total = cost_ev_per_kwh_total, cost_house_total = cost_house_total, house_cost_tibber_per_kwh = house_cost_tibber_per_kwh, cost_house_per_kwh_total = cost_house_per_kwh_total)
 
 
 @app.route("/viewconsumption", methods=["GET", "POST"])
@@ -2223,18 +2328,27 @@ def setup():
 
         fixedmontlycost = req.get("fixedmontlycost")
         fixedkwhcost    = req.get("fixedkwhcost")
+        peakkwhcost    = req.get("peakkwhcost")
         action    = req.get("action")
 
         if fixedmontlycost == '' and fixedkwhcost == '' and action[0:7] == 'Use 450':
             fixedmontlycost = 450
             fixedkwhcost = 0.715
+            peakkwhcost = 0            
 
         if fixedmontlycost == '' and fixedkwhcost == '' and action[0:7] == 'Use 405':
             fixedmontlycost = 405
-            fixedkwhcost = 0.67            
+            fixedkwhcost = 0.67        
+            peakkwhcost = 0                            
+
+        if fixedmontlycost == '' and fixedkwhcost == '' and action[0:7] == 'Use 365':
+            fixedmontlycost = 365
+            fixedkwhcost = 0.49125                        
+            peakkwhcost = 81.25
 
         session["fixedmontlycost"] = fixedmontlycost
         session["fixedkwhcost"] =   fixedkwhcost      
+        session["peakkwhcost"] =   peakkwhcost      
 
         #Flasher beskjeder dersom input data er lagret
         if fixedmontlycost != '' and fixedkwhcost != '':
