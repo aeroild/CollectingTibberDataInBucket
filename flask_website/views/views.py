@@ -28,6 +28,8 @@ from flask_website.config import tibber_token, my_bucket
 
 from google.cloud import storage
 
+from google.cloud import secretmanager
+
 #import google.cloud.storage
 
 import tempfile
@@ -357,9 +359,7 @@ def updateday():
 
         action=req["action"]
 
-        if action[0:4] == "View":
-
-            #Creating a variable from the form data
+        if action[0:4] == "View" or action[0:4] == "Edit":
             chosendate = req["chosendate2"]
 
             date_time = datetime.datetime.now()
@@ -1611,7 +1611,8 @@ def viewamonth():
         monthtoshow=chosenmonth
         chosenmonth = chosenmonth
         action = None
-    
+
+
     if request.method == "POST":
         
         req = request.form
@@ -1620,7 +1621,7 @@ def viewamonth():
         action=req.get("action")        
         monthtoshow=chosenmonth
         chosenmonth = chosenmonth
-    
+
         if action == 'Renew monthly data':
             chosenmonth = chosenmonth2
 
@@ -1797,6 +1798,7 @@ def viewamonth():
         rounded_df_aggr = df_aggr.round(decimals=2)
         aggr = rounded_df_aggr.values.tolist()
 
+
     return render_template("/viewamonth.html", months_list=months_list, data=data, monthtoshow=monthtoshow, aggr=aggr, chosenmonth=chosenmonth)
 
 @app.route("/totalcostmonth", methods=["GET", "POST"])
@@ -1804,6 +1806,7 @@ def totalcostmonth():
 
     costmonth = None
     costyear = None
+
 
     if request.method == "GET":
 
@@ -1827,6 +1830,10 @@ def totalcostmonth():
         fixedmontlycost = 365
         fixedkwhcost = 0.49125                        
         peakkwhcost = 81.25
+
+        session["fixedmontlycost"] = fixedmontlycost
+        session["fixedkwhcost"] = fixedkwhcost
+        session["peakkwhcost"] = peakkwhcost
         
     fixedmontlycost=session.get("fixedmontlycost")
     fixedkwhcost=session.get("fixedkwhcost")    
@@ -2003,12 +2010,16 @@ def totalcostmonth():
         df_effekt_total = pd.DataFrame([x.split(',') for x in effekt_total_csv.split('\n')])
         df_effekt_total.columns = ['effekt']
         df_effekt_total = df_effekt_total.head(3)
+        df_effekt_total['effekt'].replace('', np.nan, inplace=True)
+        df_effekt_total.dropna(subset=['effekt'], inplace=True)
         df_effekt_total['effekt'] = df_effekt_total['effekt'].astype(float)                                                          
         effekt_total = round(df_effekt_total.loc[:, 'effekt'].mean(), 3)
 
         df_effekt_house = pd.DataFrame([x.split(',') for x in effekt_house_csv.split('\n')])
         df_effekt_house.columns = ['effekt']
         df_effekt_house = df_effekt_house.head(3)
+        df_effekt_house['effekt'].replace('', np.nan, inplace=True)
+        df_effekt_house.dropna(subset=['effekt'], inplace=True)
         df_effekt_house['effekt'] = df_effekt_house['effekt'].astype(float)                                                                  
         effekt_house = round(df_effekt_house.loc[:, 'effekt'].mean(), 3)
 
@@ -2052,6 +2063,8 @@ def totalcostmonth():
     cost_effekt_total = (effekt_total/2) * float(peakkwhcost)
     cost_effekt_house = effekt_house * float(peakkwhcost)
     cost_effekt_ev = cost_effekt_total - cost_effekt_house
+    if cost_effekt_ev < 0:
+        cost_effekt_ev = 0
 
     #Calculating various cost elements
     if request.method == "POST" and action[0:9] == "View year":
