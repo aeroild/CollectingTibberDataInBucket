@@ -153,11 +153,11 @@ def datacollected():
             cost.append(data5)        
 
         #Creating a list of only dates 
-        date = [d[:-19] for d in start]
+        date = [d[0:10] for d in start]
 
         #Removing unnecessary info from the date variable
-        start = [d[:-13] for d in start]
-        stop = [d[:-13] for d in stop]
+        start = [d[0:16] for d in start]
+        stop = [d[0:16] for d in stop]
 
         #Removing SEK from the list containing prices
         price = ([s.replace('SEK', '') for s in price])
@@ -1827,8 +1827,8 @@ def totalcostmonth():
             fixedmontlycost = 0
             fixedkwhcost = 0
         """
-        fixedmontlycost = 365
-        fixedkwhcost = 0.49125                        
+        fixedmontlycost = 395
+        fixedkwhcost = 0.4                        
         peakkwhcost = 81.25
 
         session["fixedmontlycost"] = fixedmontlycost
@@ -1865,6 +1865,13 @@ def totalcostmonth():
             peakkwhcost = 81.25
             costmonth=session.get("costmonth")
             costyear=session.get("costyear")      
+
+        if action[0:4] == '2026':
+            fixedmontlycost = 395
+            fixedkwhcost = 0.4                        
+            peakkwhcost = 81.25
+            costmonth=session.get("costmonth")
+            costyear=session.get("costyear")                  
 
         if action[0:9] == "View sele" or action[0:9] == "View year":
             costmonth = req.get("costmonth")
@@ -1940,6 +1947,7 @@ def totalcostmonth():
     df_years = df_paths2.drop(columns=['path'])
     df_years = df_years.drop_duplicates(subset=['year'])                          
     df_years = df_years[df_years.year != '2025']    #NB!!!!!!!!!!!!!!! Linjen legges inn slik at år 2025 foreløpig ikke kan velges
+    df_years = df_years[df_years.year != '2026']    #NB!!!!!!!!!!!!!!! Linjen legges inn slik at år 2026 foreløpig ikke kan velges
     years = df_years.to_records(index=False)
     years_list = list(years)
     years_list  = [tupleObj[0] for tupleObj in years_list]    
@@ -2002,7 +2010,7 @@ def totalcostmonth():
     effekt_house = None
 
     #if costmonth[0:4] == '2025':
-    if costmonth[0:4] == '2025' or costmonth[0:7] == '2024-12':
+    if costmonth[0:4] == '2025' or costmonth[0:4] == '2026' or costmonth[0:7] == '2024-12':
 
         effekt_total_csv = bucket.get_blob('Effektavgift/{}_total.csv'.format(costmonth)).download_as_text()
         effekt_house_csv = bucket.get_blob('Effektavgift/{}_house.csv'.format(costmonth)).download_as_text()
@@ -2014,6 +2022,9 @@ def totalcostmonth():
         df_effekt_total.dropna(subset=['effekt'], inplace=True)
         df_effekt_total['effekt'] = df_effekt_total['effekt'].astype(float)                                                          
         effekt_total = round(df_effekt_total.loc[:, 'effekt'].mean(), 3)
+        effekt_total1 = round(df_effekt_total.iloc[0, 0], 2)
+        effekt_total2 = round(df_effekt_total.iloc[1, 0], 2)
+        effekt_total3 = round(df_effekt_total.iloc[2, 0], 2)
 
         df_effekt_house = pd.DataFrame([x.split(',') for x in effekt_house_csv.split('\n')])
         df_effekt_house.columns = ['effekt']
@@ -2022,7 +2033,9 @@ def totalcostmonth():
         df_effekt_house.dropna(subset=['effekt'], inplace=True)
         df_effekt_house['effekt'] = df_effekt_house['effekt'].astype(float)                                                                  
         effekt_house = round(df_effekt_house.loc[:, 'effekt'].mean(), 3)
-
+        effekt_house1 = round(df_effekt_house.iloc[0, 0], 2)
+        effekt_house2 = round(df_effekt_house.iloc[1, 0], 2)
+        effekt_house3 = round(df_effekt_house.iloc[2, 0], 2)
 
     if effekt_total == None:
         effekt_total = 0
@@ -2097,7 +2110,7 @@ def totalcostmonth():
         session["costyear"] = costyear
 
 
-    return render_template("/totalcostmonth.html", months_list=months_list, years_list=years_list, effekt_total=effekt_total, effekt_house=effekt_house, peakkwhcost=peakkwhcost, fixedkwhcost=fixedkwhcost, fixedmontlycost=fixedmontlycost, aggr=aggr, cost_house_ellevio=cost_house_ellevio, cost_ev_ellevio=cost_ev_ellevio, total_cost_ellevio=total_cost_ellevio, monthtoshow=monthtoshow, total_cost = total_cost, total_cost_tibber_per_kwh = total_cost_tibber_per_kwh, total_cost_per_kwh = total_cost_per_kwh, cost_ev_total = cost_ev_total, ev_cost_tibber_per_kwh = ev_cost_tibber_per_kwh, cost_ev_per_kwh_total = cost_ev_per_kwh_total, cost_house_total = cost_house_total, house_cost_tibber_per_kwh = house_cost_tibber_per_kwh, cost_house_per_kwh_total = cost_house_per_kwh_total)
+    return render_template("/totalcostmonth.html", months_list=months_list, years_list=years_list, effekt_total=effekt_total, effekt_house=effekt_house, peakkwhcost=peakkwhcost, fixedkwhcost=fixedkwhcost, fixedmontlycost=fixedmontlycost, aggr=aggr, cost_house_ellevio=cost_house_ellevio, cost_ev_ellevio=cost_ev_ellevio, total_cost_ellevio=total_cost_ellevio, monthtoshow=monthtoshow, total_cost = total_cost, total_cost_tibber_per_kwh = total_cost_tibber_per_kwh, total_cost_per_kwh = total_cost_per_kwh, cost_ev_total = cost_ev_total, ev_cost_tibber_per_kwh = ev_cost_tibber_per_kwh, cost_ev_per_kwh_total = cost_ev_per_kwh_total, cost_house_total = cost_house_total, house_cost_tibber_per_kwh = house_cost_tibber_per_kwh, cost_house_per_kwh_total = cost_house_per_kwh_total, effekt_total1=effekt_total1, effekt_total2=effekt_total2, effekt_total3=effekt_total3, effekt_house1=effekt_house1, effekt_house2=effekt_house2, effekt_house3=effekt_house3)
 
 
 @app.route("/viewconsumption", methods=["GET", "POST"])
